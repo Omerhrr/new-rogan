@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String?
+  googleId     String?  @unique
+  displayName  String?
+  avatar       String?
+  bio          String?
+  role         String   @default("user") // user | creator | admin
+  isLive       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  wallet       Wallet?
+  ledgerAccount LedgerAccount?
+  sentGifts    Gift[]
+  receivedGifts Gift[]  @relation("ReceivedGifts")
+  streams      Stream[]
+  sentDMs      DirectMessage[] @relation("SentDMs")
+  receivedDMs  DirectMessage[] @relation("ReceivedDMs")
+  notifications Notification[]
+  sentTransactions Transaction[] @relation("SentTransactions")
+  receivedTransactions Transaction[] @relation("ReceivedTransactions")
+  followers    Follow[] @relation("Followers")
+  following    Follow[] @relation("Following")
+  subscriptions Subscription[] @relation("Subscriber")
+  subscribers  Subscription[] @relation("CreatorSubscriptions")
+}
+
+model Wallet {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  walletAddress String?  @unique
+  linkedAt      DateTime?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model LedgerAccount {
+  id        String @id @default(cuid())
+  userId    String @unique
+  tkBalance Int    @default(0) // TK in smallest unit (1 TK = 100 units)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  type        String   // deposit | withdraw | gift_send | gift_receive | dm_payment | subscription
+  amount      Int      // amount in TK units
+  fromUserId  String
+  toUserId    String
+  referenceId String?  // gift_id, dm_id, etc.
+  metadata    String?  // JSON string for extra data
+  createdAt   DateTime @default(now())
+
+  fromUser User @relation("SentTransactions", fields: [fromUserId], references: [id])
+  toUser   User @relation("ReceivedTransactions", fields: [toUserId], references: [id])
+}
+
+model Stream {
+  id          String   @id @default(cuid())
+  creatorId   String
+  title       String
+  description String?
+  streamKey   String   @unique
+  isLive      Boolean  @default(false)
+  isPrivate   Boolean  @default(false)
+  thumbnailUrl String?
+  viewerCount Int      @default(0)
+  peakViewers Int      @default(0)
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime @default(now())
+
+  creator User @relation(fields: [creatorId], references: [id])
+  chats   ChatMessage[]
+  gifts   Gift[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  streamId  String
+  userId    String
+  message   String
+  type      String   @default("chat") // chat | system | gift_alert
+  createdAt DateTime @default(now())
+
+  stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+}
+
+model Gift {
+  id         String   @id @default(cuid())
+  streamId   String
+  senderId   String
+  receiverId String
+  giftType   String   // rose | diamond | crown | fire | heart
+  amount     Int      // TK amount
+  message    String?
+  createdAt  DateTime @default(now())
+
+  sender   User   @relation(fields: [senderId], references: [id])
+  receiver User   @relation("ReceivedGifts", fields: [receiverId], references: [id])
+  stream   Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+}
+
+model DirectMessage {
+  id          String   @id @default(cuid())
+  senderId    String
+  receiverId  String
+  message     String
+  isPaid      Boolean  @default(false)
+  price       Int      @default(0) // TK price for paid messages
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  sender   User @relation("SentDMs", fields: [senderId], references: [id])
+  receiver User @relation("ReceivedDMs", fields: [receiverId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // gift_received | dm_received | stream_live | withdrawal_status | subscription_event
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  metadata  String?  // JSON
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Follow {
+  id         String   @id @default(cuid())
+  followerId String
+  followingId String
+  createdAt  DateTime @default(now())
+
+  follower  User @relation("Followers", fields: [followerId], references: [id])
+  following User @relation("Following", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+}
+
+model Subscription {
+  id         String   @id @default(cuid())
+  subscriberId String
+  creatorId  String
+  tier       String   @default("basic") // basic | premium | vip
+  price      Int      @default(0) // TK per month
+  isActive   Boolean  @default(true)
+  startDate  DateTime @default(now())
+  endDate    DateTime?
+
+  subscriber User @relation("Subscriber", fields: [subscriberId], references: [id])
+  creator    User @relation("CreatorSubscriptions", fields: [creatorId], references: [id])
+}
