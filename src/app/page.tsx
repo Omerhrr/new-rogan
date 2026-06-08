@@ -16,6 +16,7 @@ import { CreatorDashboard } from '@/components/dashboard/CreatorDashboard';
 import { WalletView } from '@/components/wallet/WalletView';
 import { DMView } from '@/components/dm/DMView';
 import { ProfileView } from '@/components/profile/ProfileView';
+import { MarketplaceView } from '@/components/marketplace/MarketplaceView';
 import { BottomNav, type ViewType } from '@/components/shared/BottomNav';
 import { Sidebar } from '@/components/shared/Sidebar';
 
@@ -141,6 +142,8 @@ export default function HomePage() {
         return <CreatorDashboard />;
       case 'messages':
         return <DMView />;
+      case 'marketplace':
+        return <MarketplaceView />;
       case 'wallet':
         return <WalletView />;
       case 'profile':

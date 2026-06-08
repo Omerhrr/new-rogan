@@ -144,6 +144,33 @@ io.on("connection", (socket) => {
     io.to(`stream:${data.streamId}`).emit("pk:update", data);
   });
 
+  // ---- Private Stream Access Events ----
+  socket.on("stream:accessRequest", (data: { streamId: string; userId: string; username: string; creatorId: string }) => {
+    io.emit(`stream:accessRequest:${data.creatorId}`, data);
+  });
+
+  // ---- DM Request Events (for non-followers) ----
+  socket.on("dm:request", (data: { senderId: string; senderName: string; receiverId: string; message: string }) => {
+    io.emit(`dm:request:${data.receiverId}`, { ...data, id: `dmreq_${Date.now()}`, timestamp: Date.now() });
+  });
+
+  socket.on("dm:requestResponse", (data: { requestId: string; receiverId: string; senderId: string; accepted: boolean }) => {
+    io.emit(`dm:requestResponse:${data.senderId}`, data);
+  });
+
+  // ---- Task/Service Status Update Events ----
+  socket.on("task:update", (data: { requestId: string; status: string; buyerId: string; creatorId: string }) => {
+    io.emit(`task:update:${data.buyerId}`, data);
+    io.emit(`task:update:${data.creatorId}`, data);
+  });
+
+  // ---- Private Stream Started Notification ----
+  socket.on("stream:privateStart", (data: { streamId: string; creatorId: string; creatorName: string; title: string; allowedUsers: string[] }) => {
+    data.allowedUsers.forEach((uid: string) => {
+      io.emit(`stream:invite:${uid}`, { streamId: data.streamId, creatorName: data.creatorName, title: data.title });
+    });
+  });
+
   // ---- Disconnect ----
   socket.on("disconnect", () => {
     console.log(`[WS] Disconnected: ${socket.id}`);

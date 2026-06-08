@@ -4,18 +4,43 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDMStore } from '@/stores/dmStore';
 import { useAuthStore } from '@/stores/authStore';
-import { ArrowLeft, Send, Lock, MessageCircle, Search, X } from 'lucide-react';
+import { useSocket } from '@/hooks/useSocket';
+import { ArrowLeft, Send, Lock, MessageCircle, Search, X, CheckCheck, Sparkles } from 'lucide-react';
+
+// Typing indicator dots animation
+function TypingDots() {
+  return (
+    <div className="flex items-center gap-1 px-4 py-2">
+      {[0, 1, 2].map((i) => (
+        <motion.div
+          key={i}
+          className="w-1.5 h-1.5 rounded-full bg-gray-400"
+          animate={{ y: [0, -4, 0] }}
+          transition={{
+            duration: 0.6,
+            repeat: Infinity,
+            delay: i * 0.15,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 export function DMView() {
   const { conversations, activeConversation, messages, fetchConversations, openConversation, sendMessage, closeConversation } = useDMStore();
   const { user } = useAuthStore();
+  const { emit, on, off } = useSocket();
   const [input, setInput] = useState('');
   const [isPaid, setIsPaid] = useState(false);
   const [price, setPrice] = useState('5');
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Array<{ id: string; username: string; displayName: string | null; avatar: string | null }>>([]);
+  const [isTyping, setIsTyping] = useState(false);
+  const [messageRequests, setMessageRequests] = useState<Array<{ id: string; senderId: string; senderName: string; message: string; timestamp: number }>>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     fetchConversations();
@@ -25,7 +50,43 @@ export function DMView() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages.length]);
+  }, [messages.length, isTyping]);
+
+  // Socket listeners for typing and DM requests
+  useEffect(() => {
+    if (!user) return;
+
+    const cleanupTyping = on(`dm:typing:${user.id}`, () => {
+      setIsTyping(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+    });
+
+    const cleanupDmRequest = on(`dm:request:${user.id}`, (data: unknown) => {
+      const req = data as { id: string; senderId: string; senderName: string; message: string; timestamp: number };
+      setMessageRequests((prev) => [...prev, req]);
+    });
+
+    const cleanupDmSent = on('dm:sent', () => {
+      // Refresh conversations when a DM is sent via socket
+      fetchConversations();
+    });
+
+    return () => {
+      cleanupTyping?.();
+      cleanupDmRequest?.();
+      cleanupDmSent?.();
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, [user, on, off, fetchConversations]);
+
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    // Emit typing indicator
+    if (activeConversation && user) {
+      emit('dm:typing', { senderId: user.id, receiverId: activeConversation.id });
+    }
+  };
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
@@ -60,7 +121,19 @@ export function DMView() {
       isPaid,
       isPaid ? parseInt(price) * 100 : 0
     );
-    if (success) setInput('');
+    if (success) {
+      setInput('');
+      // Mark messages as read when sending
+      try {
+        await fetch('/api/dm/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: activeConversation.id }),
+        });
+      } catch {
+        // ignore
+      }
+    }
   };
 
   // Conversation list view
@@ -121,7 +194,43 @@ export function DMView() {
             )}
           </AnimatePresence>
 
-          {conversations.length === 0 && !showSearch ? (
+          {/* Message Requests Section */}
+          {messageRequests.length > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <h2 className="text-amber-400 text-sm font-semibold">Message Requests</h2>
+                <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] font-bold rounded-full">
+                  {messageRequests.length}
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {messageRequests.map((req) => (
+                  <motion.button
+                    key={req.id}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    onClick={() => {
+                      openConversation({ id: req.senderId, username: req.senderName, displayName: req.senderName, avatar: null });
+                      setMessageRequests((prev) => prev.filter((r) => r.id !== req.id));
+                    }}
+                    className="w-full flex items-center gap-3 p-3 bg-amber-500/5 rounded-xl border border-amber-500/20 hover:border-amber-500/40 transition-all text-left"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white font-bold text-sm">
+                      {req.senderName[0]}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-amber-300 text-sm font-semibold">{req.senderName}</p>
+                      <p className="text-gray-400 text-xs truncate">{req.message}</p>
+                    </div>
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  </motion.button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {conversations.length === 0 && !showSearch && messageRequests.length === 0 ? (
             <div className="text-center py-12">
               <div className="w-16 h-16 rounded-full bg-[#1A1A1A] flex items-center justify-center mx-auto mb-3">
                 <MessageCircle className="w-8 h-8 text-gray-600" />
@@ -143,6 +252,10 @@ export function DMView() {
                     <div className="w-11 h-11 rounded-full bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center text-white font-bold">
                       {conv.user.displayName?.[0] || conv.user.username[0]}
                     </div>
+                    {/* Online status indicator - shown if the user has isLive property (creators streaming) */}
+                    {'isLive' in conv.user && (conv.user as Record<string, unknown>).isLive && (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-[#1A1A1A]" />
+                    )}
                     {conv.unreadCount > 0 && (
                       <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
                         {conv.unreadCount}
@@ -150,11 +263,17 @@ export function DMView() {
                     )}
                   </div>
                   <div className="flex-1 text-left">
-                    <p className="text-white text-sm font-semibold">
-                      {conv.user.displayName || conv.user.username}
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-white text-sm font-semibold">
+                        {conv.user.displayName || conv.user.username}
+                      </p>
+                      {/* Priority/paid message indicator */}
+                      {conv.lastMessage.isPaid && (
+                        <Sparkles className="w-3 h-3 text-amber-400" />
+                      )}
+                    </div>
                     <p className="text-gray-500 text-xs truncate">
-                      {conv.lastMessage.message}
+                      {conv.lastMessage.isPaid && '🔒 '}{conv.lastMessage.message}
                     </p>
                   </div>
                   <span className="text-gray-600 text-[10px]">
@@ -180,8 +299,10 @@ export function DMView() {
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center text-white font-bold text-sm">
-          {activeConversation.displayName?.[0] || activeConversation.username[0]}
+        <div className="relative">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center text-white font-bold text-sm">
+            {activeConversation.displayName?.[0] || activeConversation.username[0]}
+          </div>
         </div>
         <div>
           <p className="text-white font-semibold text-sm">
@@ -212,16 +333,39 @@ export function DMView() {
                     <div className="flex items-center gap-1 mb-1 text-amber-400 text-xs">
                       <Lock className="w-3 h-3" />
                       Paid message • {(msg.price / 100).toFixed(0)} TK
+                      <Sparkles className="w-3 h-3 ml-1" />
                     </div>
                   )}
                   <p className="text-sm">{msg.message}</p>
-                  <p className={`text-[10px] mt-1 ${isOwn ? 'text-red-200' : 'text-gray-500'}`}>
-                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
+                  <div className={`flex items-center gap-1 mt-1 ${isOwn ? 'justify-end' : ''}`}>
+                    <p className={`text-[10px] ${isOwn ? 'text-red-200' : 'text-gray-500'}`}>
+                      {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    {/* Read receipts for own messages */}
+                    {isOwn && (
+                      <CheckCheck className={`w-3.5 h-3.5 ${msg.isRead ? 'text-blue-400' : 'text-red-200/50'}`} />
+                    )}
+                  </div>
                 </div>
               </motion.div>
             );
           })}
+        </AnimatePresence>
+
+        {/* Typing indicator */}
+        <AnimatePresence>
+          {isTyping && (
+            <motion.div
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 5 }}
+              className="flex justify-start"
+            >
+              <div className="bg-[#1A1A1A] rounded-2xl rounded-bl-md border border-white/10 overflow-hidden">
+                <TypingDots />
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
@@ -235,7 +379,7 @@ export function DMView() {
               isPaid ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-white/5 text-gray-500'
             }`}
           >
-            <Lock className="w-3 h-3" />
+            {isPaid ? <Sparkles className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
             Paid DM
           </button>
           {isPaid && (
@@ -253,7 +397,7 @@ export function DMView() {
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             placeholder="Type a message..."
             className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder-gray-600 focus:outline-none focus:border-red-500/50"
           />

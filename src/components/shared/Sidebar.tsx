@@ -1,6 +1,6 @@
 'use client';
 
-import { Home, PlusCircle, MessageCircle, User, Wallet, BarChart3, LogOut } from 'lucide-react';
+import { Home, PlusCircle, MessageCircle, User, Wallet, Briefcase, LayoutDashboard, LogOut } from 'lucide-react';
 import type { ViewType } from './BottomNav';
 
 interface SidebarProps {
@@ -16,8 +16,9 @@ export function Sidebar({ activeView, onViewChange, onLogout, username, isCreato
   const navItems: { view: ViewType; icon: typeof Home; label: string }[] = [
     { view: 'feed', icon: Home, label: 'Live Feed' },
     { view: 'golive', icon: PlusCircle, label: 'Go Live' },
-    ...(isCreator ? [{ view: 'dashboard' as ViewType, icon: BarChart3, label: 'Dashboard' }] : []),
+    ...(isCreator ? [{ view: 'dashboard' as ViewType, icon: LayoutDashboard, label: 'Dashboard' }] : []),
     { view: 'messages', icon: MessageCircle, label: 'Messages' },
+    { view: 'marketplace', icon: Briefcase, label: 'Marketplace' },
     { view: 'wallet', icon: Wallet, label: 'Wallet' },
     { view: 'profile', icon: User, label: 'Profile' },
   ];

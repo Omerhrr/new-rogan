@@ -7,6 +7,9 @@ export async function GET() {
     // Clean up existing data
     await db.notification.deleteMany();
     await db.directMessage.deleteMany();
+    await db.serviceRequest.deleteMany();
+    await db.serviceListing.deleteMany();
+    await db.streamAccess.deleteMany();
     await db.gift.deleteMany();
     await db.chatMessage.deleteMany();
     await db.transaction.deleteMany();
@@ -58,11 +61,11 @@ export async function GET() {
     // Create streams for creators
     const streams = [];
     const streamData = [
-      { creatorIdx: 0, title: 'Late Night Crypto Talk 🔥', viewerCount: 1247 },
-      { creatorIdx: 1, title: 'Dance Party Friday! 💃', viewerCount: 892 },
-      { creatorIdx: 2, title: 'EDM Live Mix Session 🎧', viewerCount: 634 },
-      { creatorIdx: 3, title: 'Ranked Grind - Top 500 Push 🎮', viewerCount: 2103 },
-      { creatorIdx: 4, title: 'Italian Pasta Night 👩‍🍳', viewerCount: 445 },
+      { creatorIdx: 0, title: 'Late Night Crypto Talk 🔥', viewerCount: 1247, isPrivate: false },
+      { creatorIdx: 1, title: 'Dance Party Friday! 💃', viewerCount: 892, isPrivate: false },
+      { creatorIdx: 2, title: 'EDM Live Mix Session 🎧', viewerCount: 634, isPrivate: false },
+      { creatorIdx: 3, title: 'Ranked Grind - Top 500 Push 🎮', viewerCount: 2103, isPrivate: false },
+      { creatorIdx: 4, title: 'Italian Pasta Night 👩‍🍳', viewerCount: 445, isPrivate: false },
     ];
 
     for (const data of streamData) {
@@ -72,6 +75,7 @@ export async function GET() {
           title: data.title,
           streamKey: `sk_${Math.random().toString(36).slice(2, 15)}`,
           isLive: true,
+          isPrivate: data.isPrivate,
           viewerCount: data.viewerCount,
           peakViewers: data.viewerCount + Math.floor(Math.random() * 500),
           startedAt: new Date(Date.now() - Math.floor(Math.random() * 3600000)),
@@ -79,6 +83,39 @@ export async function GET() {
       });
       streams.push(stream);
     }
+
+    // Create private streams
+    const privateStreams = [];
+    const privateStreamData = [
+      { creatorIdx: 0, title: 'VIP Crypto Analysis 📊', viewerCount: 15 },
+      { creatorIdx: 1, title: 'Private Dance Lesson 💃', viewerCount: 3 },
+      { creatorIdx: 3, title: 'Exclusive Gaming Coaching 🎮', viewerCount: 5 },
+    ];
+
+    for (const data of privateStreamData) {
+      const stream = await db.stream.create({
+        data: {
+          creatorId: creators[data.creatorIdx].id,
+          title: data.title,
+          streamKey: `sk_priv_${Math.random().toString(36).slice(2, 15)}`,
+          isLive: true,
+          isPrivate: true,
+          viewerCount: data.viewerCount,
+          peakViewers: data.viewerCount + 2,
+          startedAt: new Date(Date.now() - Math.floor(Math.random() * 1800000)),
+        },
+      });
+      privateStreams.push(stream);
+    }
+
+    // Grant access to some users for private streams
+    // Grant user1 and user2 access to the first private stream
+    await db.streamAccess.create({ data: { streamId: privateStreams[0].id, userId: regularUsers[0].id } });
+    await db.streamAccess.create({ data: { streamId: privateStreams[0].id, userId: regularUsers[1].id } });
+    // Grant user3 access to the second private stream
+    await db.streamAccess.create({ data: { streamId: privateStreams[1].id, userId: regularUsers[2].id } });
+    // Grant user1 access to the third private stream
+    await db.streamAccess.create({ data: { streamId: privateStreams[2].id, userId: regularUsers[0].id } });
 
     // Create some gifts
     const giftTypes = ['rose', 'heart', 'fire', 'diamond', 'crown'];
@@ -135,16 +172,45 @@ export async function GET() {
     }
 
     // Create some DMs
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       const sender = regularUsers[Math.floor(Math.random() * regularUsers.length)];
       const receiver = creators[Math.floor(Math.random() * creators.length)];
+      const isPaid = i % 3 === 0;
       await db.directMessage.create({
         data: {
           senderId: sender.id,
           receiverId: receiver.id,
           message: `Hey! Love your streams! ${i}`,
-          isPaid: i % 3 === 0,
-          price: i % 3 === 0 ? 500 : 0,
+          isPaid,
+          price: isPaid ? 500 : 0,
+          isRead: Math.random() > 0.4,
+        },
+      });
+    }
+
+    // Create DM conversations between users
+    const dmMessages = [
+      { from: 0, to: 1, msg: 'Hey! Love your streams!' },
+      { from: 1, to: 2, msg: 'Can I get a shoutout?' },
+      { from: 2, to: 3, msg: 'Your DJ sets are amazing!' },
+      { from: 3, to: 4, msg: 'GG on that last game!' },
+      { from: 4, to: 0, msg: 'The pasta recipe was great!' },
+      { from: 5, to: 0, msg: 'How do I get into crypto?' },
+      { from: 6, to: 1, msg: 'I want to learn to dance too!' },
+      { from: 0, to: 2, msg: 'When is your next set?' },
+    ];
+
+    for (const dm of dmMessages) {
+      const sender = regularUsers[dm.from];
+      const receiver = creators[dm.to % creators.length];
+      await db.directMessage.create({
+        data: {
+          senderId: sender.id,
+          receiverId: receiver.id,
+          message: dm.msg,
+          isPaid: false,
+          price: 0,
+          isRead: Math.random() > 0.5,
         },
       });
     }
@@ -180,7 +246,6 @@ export async function GET() {
 
     // Create deposit/withdraw transactions for creators
     for (const creator of creators) {
-      // Deposit transaction
       await db.transaction.create({
         data: {
           type: 'deposit',
@@ -215,12 +280,79 @@ export async function GET() {
       });
     }
 
+    // ===== PHASE 2: Service Listings =====
+    const serviceData = [
+      { creatorIdx: 0, title: '1-on-1 Crypto Consultation', description: 'Get personalized crypto investment advice in a 30-minute video call. I\'ll review your portfolio and give actionable recommendations.', category: 'video_call', price: 50, deliveryDays: 1, rating: 4.8, reviewCount: 24 },
+      { creatorIdx: 0, title: 'Custom Market Analysis Video', description: 'I\'ll create a personalized 10-minute video analyzing the crypto markets based on your specific interests and holdings.', category: 'custom_video', price: 25, deliveryDays: 2, rating: 4.5, reviewCount: 12 },
+      { creatorIdx: 1, title: 'Private Dance Lesson', description: 'Learn your favorite dance moves in a private 1-hour video call session. All skill levels welcome!', category: 'coaching', price: 35, deliveryDays: 1, rating: 5.0, reviewCount: 8 },
+      { creatorIdx: 1, title: 'Personalized Dance Shoutout', description: 'I\'ll create a custom dance video shoutout for you or a friend! Perfect for birthdays and special occasions.', category: 'shoutout', price: 10, deliveryDays: 2, rating: 4.9, reviewCount: 45 },
+      { creatorIdx: 2, title: 'Custom DJ Mix for Your Event', description: 'I\'ll create a personalized 1-hour DJ mix tailored to your event, whether it\'s a party, workout, or chill session.', category: 'custom_video', price: 75, deliveryDays: 5, rating: 4.7, reviewCount: 18 },
+      { creatorIdx: 2, title: 'Live DJ Coaching Session', description: 'Learn DJing basics or advanced techniques in a 1-hour live coaching session. Covers mixing, transitions, and track selection.', category: 'coaching', price: 40, deliveryDays: 1, rating: 4.6, reviewCount: 6 },
+      { creatorIdx: 3, title: 'Gaming Coaching - Rank Up!', description: '1-hour coaching session to help you improve your gameplay. I\'ll watch your replays and give specific tips to rank up.', category: 'coaching', price: 30, deliveryDays: 1, rating: 4.9, reviewCount: 32 },
+      { creatorIdx: 3, title: 'Custom Gaming Highlight Video', description: 'Send me your gameplay clips and I\'ll edit them into an epic highlight reel with effects, music, and transitions.', category: 'custom_video', price: 20, deliveryDays: 3, rating: 4.4, reviewCount: 15 },
+      { creatorIdx: 4, title: 'Personalized Recipe & Cooking Guide', description: 'Tell me your dietary preferences and I\'ll create a custom recipe video just for you, with step-by-step instructions.', category: 'custom_video', price: 15, deliveryDays: 2, rating: 4.8, reviewCount: 20 },
+      { creatorIdx: 4, title: 'Cooking Class - Italian Specialties', description: 'Join me for a live 1-hour cooking class where we make authentic Italian pasta from scratch. Ingredient list provided in advance!', category: 'video_call', price: 25, deliveryDays: 1, rating: 5.0, reviewCount: 11 },
+    ];
+
+    for (const data of serviceData) {
+      await db.serviceListing.create({
+        data: {
+          creatorId: creators[data.creatorIdx].id,
+          title: data.title,
+          description: data.description,
+          category: data.category,
+          price: data.price * 100, // Convert to TK units
+          deliveryDays: data.deliveryDays,
+          rating: data.rating,
+          reviewCount: data.reviewCount,
+          isActive: true,
+        },
+      });
+    }
+
+    // ===== PHASE 2: Service Requests =====
+    const requestData = [
+      { buyerIdx: 0, serviceCreatorIdx: 0, serviceTitle: '1-on-1 Crypto Consultation', message: 'I\'d like to discuss my BTC and ETH holdings. When are you available?', status: 'accepted', price: 50 },
+      { buyerIdx: 1, serviceCreatorIdx: 1, serviceTitle: 'Personalized Dance Shoutout', message: 'Can you make a birthday shoutout for my friend Sarah? She loves your streams!', status: 'in_progress', price: 10 },
+      { buyerIdx: 2, serviceCreatorIdx: 3, serviceTitle: 'Gaming Coaching - Rank Up!', message: 'I\'m stuck in Gold and want to reach Platinum. Help me analyze my replays!', status: 'delivered', deliveryMessage: 'Here\'s my analysis of your gameplay! I noticed 3 key areas for improvement. Check the video I sent!', price: 30 },
+      { buyerIdx: 3, serviceCreatorIdx: 2, serviceTitle: 'Custom DJ Mix for Your Event', message: 'I need a chill lo-fi mix for my study group sessions. 1 hour would be perfect!', status: 'pending', price: 75 },
+      { buyerIdx: 4, serviceCreatorIdx: 4, serviceTitle: 'Cooking Class - Italian Specialties', message: 'I want to learn to make carbonara! Can we schedule a session this weekend?', status: 'completed', price: 25 },
+      { buyerIdx: 5, serviceCreatorIdx: 0, serviceTitle: 'Custom Market Analysis Video', message: 'Can you analyze the altcoin market? Specifically looking at SOL and ADA.', status: 'cancelled', price: 25 },
+    ];
+
+    // Get all service listings to find their IDs
+    const allServices = await db.serviceListing.findMany();
+
+    for (const data of requestData) {
+      const matchingService = allServices.find(
+        (s) => s.creatorId === creators[data.serviceCreatorIdx].id && s.title === data.serviceTitle
+      );
+
+      if (matchingService) {
+        await db.serviceRequest.create({
+          data: {
+            serviceId: matchingService.id,
+            buyerId: regularUsers[data.buyerIdx].id,
+            creatorId: creators[data.serviceCreatorIdx].id,
+            message: data.message,
+            status: data.status,
+            price: data.price * 100,
+            deliveryMessage: data.deliveryMessage || null,
+          },
+        });
+      }
+    }
+
     return NextResponse.json({
-      message: 'Seed data created successfully',
+      message: 'Seed data created successfully (Phase 1 + Phase 2)',
       stats: {
         creators: creators.length,
         users: regularUsers.length,
-        streams: streams.length,
+        streams: streams.length + privateStreams.length,
+        privateStreams: privateStreams.length,
+        serviceListings: serviceData.length,
+        serviceRequests: requestData.length,
+        streamAccessGrants: 4,
       },
     });
   } catch (error) {
