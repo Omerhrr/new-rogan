@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest } from '@/lib/auth';
+import { getUserFromRequest, rateLimit } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,6 +13,11 @@ export async function POST(request: NextRequest) {
     // In development, allow any user for testing purposes
     if (process.env.NODE_ENV === 'production' && user.role !== 'admin') {
       return NextResponse.json({ error: 'Deposits require admin authorization. Use the payment gateway.' }, { status: 403 });
+    }
+
+    // SECURITY: Rate limit deposit attempts
+    if (!rateLimit(`deposit:${user.id}`, 5, 60_000)) {
+      return NextResponse.json({ error: 'Too many deposit attempts. Please wait.' }, { status: 429 });
     }
 
     const body = await request.json();

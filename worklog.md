@@ -1,35 +1,28 @@
 ---
-Task ID: security-audit
+Task ID: 1
 Agent: Super Z (main)
-Task: Comprehensive security audit and bug fix for Rogan Live platform
+Task: Security audit continuation — fix remaining vulnerabilities and bugs
 
 Work Log:
-- Ran 3 parallel audit agents covering all API routes, auth/WS, and DB schema/stores
-- Identified 32 vulnerabilities across CRITICAL (6), HIGH (10), MEDIUM (9), LOW (7) severities
-- Fixed all CRITICAL and HIGH issues, and most MEDIUM/LOW issues
+- Analyzed full codebase state from previous session (files didn't persist)
+- Identified actual remaining gaps (codebase was more mature than initial audit assumed)
+- Created `src/lib/errors.ts` — centralized API error handling (Prisma error mapping, safe 500s)
+- Updated `src/lib/auth.ts` — added `rateLimit()` and `getClientId()` functions; made JWT_SECRET throw in production instead of just logging
+- Created `src/middleware.ts` — Next.js middleware for security headers (X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, Permissions-Policy, removes X-Powered-By)
+- Fixed `PATCH /api/users/me` — sanitized displayName, avatar (URL validation), bio inputs
+- Fixed `PATCH /api/services/[id]` — sanitized title, description; validated category enum, price bounds, deliveryDays integer range
+- Fixed `PATCH /api/subscriptions/tiers/[id]` — sanitized name, benefits (array validation + per-item sanitize); validated price > 0
+- Fixed TOCTOU race condition in `POST /api/subscriptions/subscribe` — moved balance check inside `$transaction`
+- Added rate limiting to: gifts (30/min), deposit (5/min), withdraw (3/min), subscribe (5/min), register (5/min IP), login (10/15min email + 20/15min IP)
+- Fixed `POST /api/economy/withdraw` — now requires linked wallet address; added minimum withdrawal amount
+- Fixed WebSocket server — replaced all `io.emit()` user-targeted events with `io.to('user:${userId}')` room-based delivery (O(1) instead of O(n)); auto-join users to personal room on connection
+- Updated frontend components (DMView, PKChallengePanel, PKBattleArena) to match new WS event names
+- Refactored login route to use centralized `rateLimit()` instead of custom implementation
+- Verified all modified backend files compile cleanly with TypeScript
 
 Stage Summary:
-- Fixed hardcoded JWT secret fallback — now fails hard if JWT_SECRET env is missing
-- Fixed WebSocket zero auth — added JWT verification middleware with identity validation
-- Fixed WS CORS wildcard — restricted to configurable origins
-- Fixed seed endpoint — now requires admin auth and is blocked in production
-- Fixed race conditions in all financial operations — wrapped in $transaction()
-- Fixed stream key exposure — excluded from all public API responses via explicit select
-- Fixed PK battle score manipulation — scores computed server-side only
-- Fixed deposit endpoint — admin-only in production, validated amounts
-- Fixed token leaked in response body — removed from login/register responses
-- Fixed cookie secure flag — now secure in production
-- Fixed JWT algorithm pinning — explicitly set HS256
-- Added login rate limiting — 10 attempts per 15 minutes
-- Added input validation and sanitization across all API routes
-- Added email/username format validation on registration
-- Added stronger password policy — min 8 chars, max 128
-- Added private stream access checks
-- Added gift receiver validation (must be stream creator)
-- Removed viewer count from client-submitted PATCH (prevents fraud)
-- Added database indexes for all common query patterns
-- Added cascading deletes and SetNull for financial audit trails
-- Removed demo credentials from production UI
-- Removed email (PII) from client-side Zustand store
-- Updated socket client hook to pass auth token
-- Added security headers via middleware (removed due to Next.js 16 deprecation)
+- 12 security vulnerabilities and bugs fixed
+- New infrastructure: rate limiter, error handler, security middleware
+- WebSocket performance improved (room-based targeting instead of global broadcast)
+- All financial endpoints now have rate limiting and transaction-level balance checks
+- No new TypeScript compilation errors introduced

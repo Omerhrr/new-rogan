@@ -61,7 +61,8 @@ export function PKChallengePanel({ streamId, onClose }: PKChallengePanelProps) {
   useEffect(() => {
     if (!user) return;
 
-    const cleanup = on(`pk:challenge:${user.id}`, (data: unknown) => {
+    // With room-based targeting, server emits 'pk:challenge' to user:${userId} room
+    const cleanup = on('pk:challenge', (data: unknown) => {
       const d = data as { fromCreatorId: string; fromCreatorName: string; streamId: string };
       setIncomingChallenge(d);
     });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest, sanitizeString } from '@/lib/auth';
+import { getUserFromRequest, sanitizeString, rateLimit } from '@/lib/auth';
 
 const GIFT_PRICES: Record<string, number> = {
   rose: 1,
@@ -15,6 +15,11 @@ export async function POST(request: NextRequest) {
     const user = await getUserFromRequest();
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    // SECURITY: Rate limit gift sending
+    if (!rateLimit(`gift:${user.id}`, 30, 60_000)) {
+      return NextResponse.json({ error: 'Slow down! Too many gifts.' }, { status: 429 });
     }
 
     const body = await request.json();

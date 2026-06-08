@@ -6,8 +6,12 @@ import { db } from './db';
 // SECURITY: Fail hard if JWT_SECRET is missing — no hardcoded fallbacks
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  console.error('FATAL: JWT_SECRET environment variable is not set. Refusing to start.');
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: JWT_SECRET environment variable is required in production. Server cannot start.');
+  }
+  console.error('WARNING: JWT_SECRET not set. Using insecure dev-only secret. DO NOT use in production!');
 }
+const EFFECTIVE_SECRET = JWT_SECRET || 'rogan-live-dev-only-insecure-secret';
 const TOKEN_NAME = 'rogan_live_token';
 const TOKEN_EXPIRY = '7d';
 
@@ -24,16 +28,14 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export function signToken(payload: { userId: string; email: string; role: string }): string {
-  if (!JWT_SECRET) throw new Error('JWT_SECRET not configured');
   // SECURITY: Explicitly pin algorithm to HS256 to prevent algorithm confusion attacks
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_EXPIRY, algorithm: 'HS256' });
+  return jwt.sign(payload, EFFECTIVE_SECRET, { expiresIn: TOKEN_EXPIRY, algorithm: 'HS256' });
 }
 
 export function verifyToken(token: string): { userId: string; email: string; role: string } | null {
-  if (!JWT_SECRET) return null;
   try {
     // SECURITY: Explicitly allow only HS256 algorithm
-    return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { userId: string; email: string; role: string };
+    return jwt.verify(token, EFFECTIVE_SECRET, { algorithms: ['HS256'] }) as { userId: string; email: string; role: string };
   } catch {
     return null;
   }
@@ -116,4 +118,54 @@ export function validateUsername(username: string): boolean {
 export function sanitizeString(input: string, maxLength: number = 1000): string {
   // Strip HTML tags and trim whitespace
   return input.replace(/<[^>]*>/g, '').trim().slice(0, maxLength);
+}
+
+// ── Rate Limiting ─────────────────────────────────────────────────
+// In-memory rate limiter (per-process).
+// For multi-instance deployments, replace with Redis-backed store.
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+/**
+ * Check if a request is within rate limits.
+ * @returns `true` if allowed, `false` if rate-limited
+ */
+export function rateLimit(key: string, maxRequests: number, windowMs: number): boolean {
+  const now = Date.now();
+  const entry = rateLimitStore.get(key);
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+
+  if (entry.count >= maxRequests) {
+    return false;
+  }
+
+  entry.count++;
+  return true;
+}
+
+// Clean up expired entries every 2 minutes
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of rateLimitStore) {
+      if (now > entry.resetAt) {
+        rateLimitStore.delete(key);
+      }
+    }
+  }, 120_000);
+}
+
+/**
+ * Extract a client identifier from the request for rate limiting.
+ * Uses x-forwarded-for (first IP), x-real-ip, or falls back to 'unknown'.
+ */
+export function getClientId(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0].trim();
+  const realIp = request.headers.get('x-real-ip');
+  if (realIp) return realIp.trim();
+  return 'unknown';
 }

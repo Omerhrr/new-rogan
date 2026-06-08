@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { hashPassword, signToken, setAuthCookie, validateEmail, validateUsername, sanitizeString } from '@/lib/auth';
+import { hashPassword, signToken, setAuthCookie, validateEmail, validateUsername, sanitizeString, rateLimit, getClientId } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
+    // SECURITY: Rate limit registration attempts by IP
+    const clientId = getClientId(request);
+    if (!rateLimit(`register:${clientId}`, 5, 60_000)) {
+      return NextResponse.json({ error: 'Too many registration attempts. Please wait.' }, { status: 429 });
+    }
+
     const body = await request.json();
     const { email, username, password } = body;
 

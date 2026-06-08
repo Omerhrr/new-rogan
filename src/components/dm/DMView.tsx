@@ -56,13 +56,18 @@ export function DMView() {
   useEffect(() => {
     if (!user) return;
 
-    const cleanupTyping = on(`dm:typing:${user.id}`, () => {
-      setIsTyping(true);
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+    // With room-based targeting, the server emits to user:${userId} room
+    // with generic event names (no user ID suffix needed since only that user's room receives it)
+    const cleanupTyping = on('dm:typing', (data: unknown) => {
+      const typingData = data as { senderId: string };
+      if (activeConversation && typingData.senderId === activeConversation.id) {
+        setIsTyping(true);
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+      }
     });
 
-    const cleanupDmRequest = on(`dm:request:${user.id}`, (data: unknown) => {
+    const cleanupDmRequest = on('dm:request', (data: unknown) => {
       const req = data as { id: string; senderId: string; senderName: string; message: string; timestamp: number };
       setMessageRequests((prev) => [...prev, req]);
     });
@@ -78,7 +83,7 @@ export function DMView() {
       cleanupDmSent?.();
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [user, on, off, fetchConversations]);
+  }, [user, on, off, fetchConversations, activeConversation]);
 
   const handleInputChange = (value: string) => {
     setInput(value);

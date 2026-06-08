@@ -100,7 +100,7 @@ export function PKBattleArena() {
     // Listen for incoming challenges
     let cleanupChallenge: (() => void) | undefined;
     if (user) {
-      cleanupChallenge = on(`pk:challenge:${user.id}`, (data: unknown) => {
+      cleanupChallenge = on('pk:challenge', (data: unknown) => {
         const d = data as { fromCreatorId: string; fromCreatorName: string; streamId: string; battleId?: string };
         setIncomingChallenge(d);
       });
@@ -109,7 +109,7 @@ export function PKBattleArena() {
     // Listen for battle acceptance
     let cleanupAccepted: (() => void) | undefined;
     if (user) {
-      cleanupAccepted = on(`pk:started:${user.id}`, (data: unknown) => {
+      cleanupAccepted = on('pk:started', (data: unknown) => {
         const d = data as { battleId: string; streamId: string; opponentId: string };
         setChallengeSent(false);
         setShowChallengePanel(false);

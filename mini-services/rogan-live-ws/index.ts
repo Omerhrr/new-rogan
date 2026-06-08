@@ -46,6 +46,9 @@ io.on("connection", (socket) => {
   const user = socket.data.user as AuthenticatedSocketData;
   console.log(`[WS] Connected: ${socket.id} (User: ${user.userId})`);
 
+  // SECURITY: Auto-join user to their own room for targeted DMs and notifications
+  socket.join(`user:${user.userId}`);
+
   // ---- Stream Events ----
   socket.on("stream:start", (data: { streamId: string; creatorId: string; creatorName: string; title: string }) => {
     // SECURITY: Only allow starting streams as yourself
@@ -184,8 +187,8 @@ io.on("connection", (socket) => {
     };
     // Broadcast gift to stream room
     io.to(`stream:${data.streamId}`).emit("gift:received", giftEvent);
-    // Send notification to creator
-    io.emit("notification", {
+    // Send notification to creator via their personal room
+    io.to(`user:${data.receiverId}`).emit("notification", {
       userId: data.receiverId,
       type: "gift_received",
       title: "Gift Received!",
@@ -213,8 +216,8 @@ io.on("connection", (socket) => {
       id: `dm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       timestamp: Date.now(),
     };
-    // Notify receiver
-    io.emit(`dm:${data.receiverId}`, dmEvent);
+    // Notify receiver via their personal room (O(1) instead of O(n) broadcast)
+    io.to(`user:${data.receiverId}`).emit("dm:received", dmEvent);
     // Confirm to sender
     socket.emit("dm:sent", dmEvent);
   });
@@ -222,23 +225,25 @@ io.on("connection", (socket) => {
   socket.on("dm:typing", (data: { senderId: string; receiverId: string }) => {
     // SECURITY: Only allow as yourself
     if (data.senderId !== user.userId) return;
-    io.emit(`dm:typing:${data.receiverId}`, { senderId: data.senderId });
+    io.to(`user:${data.receiverId}`).emit("dm:typing", { senderId: data.senderId });
   });
 
   socket.on("dm:read", (data: { senderId: string; receiverId: string }) => {
     // SECURITY: Only the receiver can mark as read
     if (data.receiverId !== user.userId) return;
-    io.emit(`dm:read:${data.senderId}`, { readBy: data.receiverId });
+    io.to(`user:${data.senderId}`).emit("dm:read", { readBy: data.receiverId });
   });
 
   // ---- Notification Events ----
   socket.on("notification:subscribe", (data: { userId: string }) => {
     // SECURITY: Only subscribe to your own notifications
+    // Note: Users are already auto-joined to `user:${userId}` on connection
+    // This handler is kept for backwards compatibility
     if (data.userId !== user.userId && user.role !== "admin") {
       socket.emit("error", { message: "Cannot subscribe to another user's notifications" });
       return;
     }
-    socket.join(`notifications:${data.userId}`);
+    // Already in user:${userId} room from connection
   });
 
   // ---- PK Battle Events ----
@@ -250,7 +255,7 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Cannot issue challenge as another creator" });
       return;
     }
-    io.emit(`pk:challenge:${data.toCreatorId}`, data);
+    io.to(`user:${data.toCreatorId}`).emit("pk:challenge", data);
   });
 
   socket.on("pk:update", (data: { streamId: string; creator1Score: number; creator2Score: number }) => {
@@ -274,9 +279,9 @@ io.on("connection", (socket) => {
       creator1Score: 0,
       creator2Score: 0,
     };
-    // Notify both creators
-    io.emit(`pk:started:${data.creator1Id}`, { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator2Id });
-    io.emit(`pk:started:${data.creator2Id}`, { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator1Id });
+    // Notify both creators via their personal rooms
+    io.to(`user:${data.creator1Id}`).emit("pk:started", { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator2Id });
+    io.to(`user:${data.creator2Id}`).emit("pk:started", { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator1Id });
     // Broadcast to stream viewers
     io.to(`stream:${data.streamId}`).emit("pk:started", { battleId: data.battleId, creator1Id: data.creator1Id, creator2Id: data.creator2Id, duration: data.duration });
     console.log(`[PK] Battle started: ${data.creator1Id} vs ${data.creator2Id}`);
@@ -330,7 +335,7 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Cannot request access as another user" });
       return;
     }
-    io.emit(`stream:accessRequest:${data.creatorId}`, data);
+    io.to(`user:${data.creatorId}`).emit("stream:accessRequest", data);
   });
 
   // ---- DM Request Events (for non-followers) ----
@@ -342,7 +347,7 @@ io.on("connection", (socket) => {
     }
     const sanitizedMessage = data.message.replace(/<[^>]*>/g, "").trim().slice(0, 500);
     if (!sanitizedMessage) return;
-    io.emit(`dm:request:${data.receiverId}`, { ...data, message: sanitizedMessage, id: `dmreq_${Date.now()}`, timestamp: Date.now() });
+    io.to(`user:${data.receiverId}`).emit("dm:request", { ...data, message: sanitizedMessage, id: `dmreq_${Date.now()}`, timestamp: Date.now() });
   });
 
   socket.on("dm:requestResponse", (data: { requestId: string; receiverId: string; senderId: string; accepted: boolean }) => {
@@ -351,7 +356,7 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Cannot respond to DM requests for another user" });
       return;
     }
-    io.emit(`dm:requestResponse:${data.senderId}`, data);
+    io.to(`user:${data.senderId}`).emit("dm:requestResponse", data);
   });
 
   // ---- Task/Service Status Update Events ----
@@ -361,8 +366,8 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Not authorized to update this task" });
       return;
     }
-    io.emit(`task:update:${data.buyerId}`, data);
-    io.emit(`task:update:${data.creatorId}`, data);
+    io.to(`user:${data.buyerId}`).emit("task:update", data);
+    io.to(`user:${data.creatorId}`).emit("task:update", data);
   });
 
   // ---- Private Stream Started Notification ----
@@ -373,7 +378,7 @@ io.on("connection", (socket) => {
       return;
     }
     data.allowedUsers.forEach((uid: string) => {
-      io.emit(`stream:invite:${uid}`, { streamId: data.streamId, creatorName: data.creatorName, title: data.title });
+      io.to(`user:${uid}`).emit("stream:invite", { streamId: data.streamId, creatorName: data.creatorName, title: data.title });
     });
   });
 

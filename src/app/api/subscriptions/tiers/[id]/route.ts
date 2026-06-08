@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest } from '@/lib/auth';
+import { getUserFromRequest, sanitizeString } from '@/lib/auth';
 
 // PATCH - Update a subscription tier
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -16,16 +16,33 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (existingTier.creatorId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const updateData: Record<string, unknown> = {};
-    if (body.name !== undefined) updateData.name = body.name;
+    if (body.name !== undefined) {
+      const sanitizedName = sanitizeString(body.name, 50);
+      if (!sanitizedName) return NextResponse.json({ error: 'Tier name cannot be empty' }, { status: 400 });
+      updateData.name = sanitizedName;
+    }
     if (body.tier !== undefined) {
       if (!['basic', 'premium', 'vip'].includes(body.tier)) {
         return NextResponse.json({ error: 'Invalid tier level' }, { status: 400 });
       }
       updateData.tier = body.tier;
     }
-    if (body.price !== undefined) updateData.price = Math.max(0, body.price);
-    if (body.benefits !== undefined) updateData.benefits = JSON.stringify(body.benefits);
-    if (body.isActive !== undefined) updateData.isActive = body.isActive;
+    if (body.price !== undefined) {
+      if (typeof body.price !== 'number' || !Number.isFinite(body.price) || body.price <= 0 || body.price > 10000000) {
+        return NextResponse.json({ error: 'Price must be a positive number' }, { status: 400 });
+      }
+      updateData.price = Math.floor(body.price);
+    }
+    if (body.benefits !== undefined) {
+      if (!Array.isArray(body.benefits)) {
+        return NextResponse.json({ error: 'Benefits must be an array' }, { status: 400 });
+      }
+      const sanitizedBenefits = body.benefits.map((b: unknown) => typeof b === 'string' ? sanitizeString(b, 100) : '').filter(Boolean);
+      updateData.benefits = JSON.stringify(sanitizedBenefits);
+    }
+    if (body.isActive !== undefined) {
+      updateData.isActive = Boolean(body.isActive);
+    }
 
     const updated = await db.subscriptionTier.update({
       where: { id },
