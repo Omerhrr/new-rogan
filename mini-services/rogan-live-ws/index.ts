@@ -136,12 +136,61 @@ io.on("connection", (socket) => {
   });
 
   // ---- PK Battle Events ----
-  socket.on("pk:challenge", (data: { fromCreatorId: string; toCreatorId: string; streamId: string }) => {
+  const activePKBattles: Record<string, { creator1Id: string; creator2Id: string; creator1Score: number; creator2Score: number; timerInterval?: ReturnType<typeof setInterval> }> = {};
+
+  socket.on("pk:challenge", (data: { fromCreatorId: string; toCreatorId: string; streamId: string; fromCreatorName: string }) => {
     io.emit(`pk:challenge:${data.toCreatorId}`, data);
   });
 
   socket.on("pk:update", (data: { streamId: string; creator1Score: number; creator2Score: number }) => {
     io.to(`stream:${data.streamId}`).emit("pk:update", data);
+  });
+
+  socket.on("pk:start", (data: { battleId: string; streamId: string; creator1Id: string; creator2Id: string; duration: number }) => {
+    activePKBattles[data.battleId] = {
+      creator1Id: data.creator1Id,
+      creator2Id: data.creator2Id,
+      creator1Score: 0,
+      creator2Score: 0,
+    };
+    // Notify both creators
+    io.emit(`pk:started:${data.creator1Id}`, { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator2Id });
+    io.emit(`pk:started:${data.creator2Id}`, { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator1Id });
+    // Broadcast to stream viewers
+    io.to(`stream:${data.streamId}`).emit("pk:started", { battleId: data.battleId, creator1Id: data.creator1Id, creator2Id: data.creator2Id, duration: data.duration });
+    console.log(`[PK] Battle started: ${data.creator1Id} vs ${data.creator2Id}`);
+  });
+
+  socket.on("pk:giftScore", (data: { battleId: string; streamId: string; receiverCreatorId: string; amount: number }) => {
+    const battle = activePKBattles[data.battleId];
+    if (!battle) return;
+    if (data.receiverCreatorId === battle.creator1Id) {
+      battle.creator1Score += data.amount;
+    } else if (data.receiverCreatorId === battle.creator2Id) {
+      battle.creator2Score += data.amount;
+    }
+    io.to(`stream:${data.streamId}`).emit("pk:scoreUpdate", {
+      battleId: data.battleId,
+      creator1Score: battle.creator1Score,
+      creator2Score: battle.creator2Score,
+    });
+  });
+
+  socket.on("pk:end", (data: { battleId: string; streamId: string; winnerId: string | null }) => {
+    const battle = activePKBattles[data.battleId];
+    if (!battle) return;
+    io.to(`stream:${data.streamId}`).emit("pk:ended", {
+      battleId: data.battleId,
+      winnerId: data.winnerId,
+      creator1Score: battle.creator1Score,
+      creator2Score: battle.creator2Score,
+    });
+    delete activePKBattles[data.battleId];
+    console.log(`[PK] Battle ended: ${data.battleId}, winner: ${data.winnerId || 'draw'}`);
+  });
+
+  socket.on("pk:timer", (data: { battleId: string; streamId: string; timeRemaining: number }) => {
+    io.to(`stream:${data.streamId}`).emit("pk:timer", { battleId: data.battleId, timeRemaining: data.timeRemaining });
   });
 
   // ---- Private Stream Access Events ----

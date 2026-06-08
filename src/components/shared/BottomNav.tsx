@@ -1,9 +1,9 @@
 'use client';
 
-import { Home, PlusCircle, MessageCircle, User, Wallet, Briefcase } from 'lucide-react';
+import { Home, Swords, MessageCircle, User, Wallet, Briefcase } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-export type ViewType = 'feed' | 'golive' | 'messages' | 'wallet' | 'marketplace' | 'profile' | 'dashboard';
+export type ViewType = 'feed' | 'golive' | 'messages' | 'wallet' | 'marketplace' | 'profile' | 'dashboard' | 'pk' | 'subscriptions';
 
 interface BottomNavProps {
   activeView: ViewType;
@@ -14,7 +14,7 @@ interface BottomNavProps {
 export function BottomNav({ activeView, onViewChange, unreadDMs = 0 }: BottomNavProps) {
   const navItems: { view: ViewType; icon: typeof Home; label: string }[] = [
     { view: 'feed', icon: Home, label: 'Live' },
-    { view: 'golive', icon: PlusCircle, label: 'Go Live' },
+    { view: 'pk', icon: Swords, label: 'PK' },
     { view: 'marketplace', icon: Briefcase, label: 'Services' },
     { view: 'messages', icon: MessageCircle, label: 'DMs' },
     { view: 'wallet', icon: Wallet, label: 'Wallet' },

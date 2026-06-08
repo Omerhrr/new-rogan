@@ -4,7 +4,11 @@ import { hashPassword } from '@/lib/auth';
 
 export async function GET() {
   try {
-    // Clean up existing data
+    // Clean up existing data (Phase 3 models first due to foreign keys)
+    await db.serviceReview.deleteMany();
+    await db.pKBattle.deleteMany();
+    await db.subscriptionTier.deleteMany();
+    // Phase 1+2 models
     await db.notification.deleteMany();
     await db.directMessage.deleteMany();
     await db.serviceRequest.deleteMany();
@@ -343,16 +347,211 @@ export async function GET() {
       }
     }
 
+    // ===== PHASE 3: Subscription Tiers =====
+    const tierData = [
+      { creatorIdx: 0, name: 'Basic Fan', tier: 'basic', price: 500, benefits: ['Chat badge', 'Emotes access'] },
+      { creatorIdx: 0, name: 'Premium Supporter', tier: 'premium', price: 2000, benefits: ['Chat badge', 'Emotes access', 'Private chat access', 'Priority Q&A'] },
+      { creatorIdx: 0, name: 'VIP Inner Circle', tier: 'vip', price: 5000, benefits: ['All premium perks', '1-on-1 monthly call', 'Exclusive content', 'Behind the scenes'] },
+      { creatorIdx: 1, name: 'Dance Fan', tier: 'basic', price: 500, benefits: ['Chat badge', 'Dance emotes'] },
+      { creatorIdx: 1, name: 'Dance VIP', tier: 'premium', price: 2000, benefits: ['Chat badge', 'Dance emotes', 'Private lessons discount', 'Shoutout priority'] },
+      { creatorIdx: 2, name: 'Beat Lover', tier: 'basic', price: 500, benefits: ['Chat badge', 'Song requests'] },
+      { creatorIdx: 2, name: 'DJ VIP', tier: 'vip', price: 5000, benefits: ['All premium perks', 'Custom mix monthly', 'Backstage access', 'Early releases'] },
+      { creatorIdx: 3, name: 'Gamer Buddy', tier: 'basic', price: 500, benefits: ['Chat badge', 'Game emotes'] },
+      { creatorIdx: 3, name: 'Pro Gamer Sub', tier: 'premium', price: 2000, benefits: ['Chat badge', 'Game emotes', 'Coaching discount', 'Play together Fridays'] },
+      { creatorIdx: 4, name: 'Foodie Fan', tier: 'basic', price: 500, benefits: ['Chat badge', 'Recipe access'] },
+      { creatorIdx: 4, name: 'Kitchen VIP', tier: 'premium', price: 2000, benefits: ['Chat badge', 'Recipe access', 'Private cooking class discount', 'Custom recipes'] },
+    ];
+
+    for (const data of tierData) {
+      await db.subscriptionTier.create({
+        data: {
+          creatorId: creators[data.creatorIdx].id,
+          name: data.name,
+          tier: data.tier,
+          price: data.price,
+          benefits: JSON.stringify(data.benefits),
+          isActive: true,
+        },
+      });
+    }
+
+    // ===== PHASE 3: Active Subscriptions =====
+    const subscriptionData = [
+      { subscriberIdx: 0, creatorIdx: 0, tier: 'premium', price: 2000 },
+      { subscriberIdx: 1, creatorIdx: 0, tier: 'basic', price: 500 },
+      { subscriberIdx: 2, creatorIdx: 1, tier: 'premium', price: 2000 },
+      { subscriberIdx: 3, creatorIdx: 3, tier: 'basic', price: 500 },
+      { subscriberIdx: 4, creatorIdx: 4, tier: 'premium', price: 2000 },
+      { subscriberIdx: 5, creatorIdx: 2, tier: 'basic', price: 500 },
+      { subscriberIdx: 6, creatorIdx: 0, tier: 'vip', price: 5000 },
+      { subscriberIdx: 7, creatorIdx: 1, tier: 'basic', price: 500 },
+      { subscriberIdx: 8, creatorIdx: 3, tier: 'premium', price: 2000 },
+      { subscriberIdx: 9, creatorIdx: 2, tier: 'vip', price: 5000 },
+    ];
+
+    for (const data of subscriptionData) {
+      await db.subscription.create({
+        data: {
+          subscriberId: regularUsers[data.subscriberIdx].id,
+          creatorId: creators[data.creatorIdx].id,
+          tier: data.tier,
+          price: data.price,
+          isActive: true,
+          startDate: new Date(Date.now() - Math.floor(Math.random() * 30 * 24 * 3600000)),
+        },
+      });
+    }
+
+    // ===== PHASE 3: PK Battles =====
+    // 1 active battle
+    await db.pKBattle.create({
+      data: {
+        streamId: streams[0].id,
+        creator1Id: creators[0].id,
+        creator2Id: creators[1].id,
+        creator1Score: 4500,
+        creator2Score: 3200,
+        status: 'active',
+        duration: 300,
+        startedAt: new Date(Date.now() - 120000), // started 2 min ago
+      },
+    });
+
+    // 1 completed battle
+    await db.pKBattle.create({
+      data: {
+        streamId: streams[3].id,
+        creator1Id: creators[3].id,
+        creator2Id: creators[2].id,
+        creator1Score: 8200,
+        creator2Score: 7600,
+        status: 'completed',
+        duration: 300,
+        startedAt: new Date(Date.now() - 3600000),
+        endedAt: new Date(Date.now() - 3300000),
+        winnerId: creators[3].id,
+      },
+    });
+
+    // 1 pending battle
+    // Need a separate stream for this PK since streamId is unique
+    const pkStream = await db.stream.create({
+      data: {
+        creatorId: creators[4].id,
+        title: 'PK Battle Stream 🏆',
+        streamKey: `sk_pk_${Math.random().toString(36).slice(2, 15)}`,
+        isLive: true,
+        isPrivate: false,
+        viewerCount: 523,
+        peakViewers: 800,
+        startedAt: new Date(Date.now() - 300000),
+      },
+    });
+
+    await db.pKBattle.create({
+      data: {
+        streamId: pkStream.id,
+        creator1Id: creators[4].id,
+        creator2Id: creators[0].id,
+        creator1Score: 0,
+        creator2Score: 0,
+        status: 'pending',
+        duration: 600,
+      },
+    });
+
+    // ===== PHASE 3: Service Reviews =====
+    const allRequests = await db.serviceRequest.findMany({
+      where: { status: 'completed' },
+    });
+
+    const reviewData = [
+      { requestIdx: 0, rating: 5, comment: 'Absolutely amazing! Best consultation I\'ve ever had. Crypto Rogan really knows his stuff!' },
+      { requestIdx: 0, rating: 4, comment: 'Great session, learned a lot. Would book again!' },
+      { requestIdx: 0, rating: 5, comment: 'Chef Aria is incredible! The cooking class was so fun and I learned authentic techniques.' },
+      { requestIdx: 0, rating: 4, comment: 'Really good service, delivered on time. Minor communication delay but overall great experience.' },
+      { requestIdx: 0, rating: 5, comment: 'Went above and beyond! Highly recommend to anyone looking for quality.' },
+    ];
+
+    for (let i = 0; i < Math.min(reviewData.length, allRequests.length); i++) {
+      const req = allRequests[i];
+      const rev = reviewData[i];
+      // Check if review already exists for this request
+      const existingReview = await db.serviceReview.findUnique({ where: { requestId: req.id } });
+      if (!existingReview) {
+        await db.serviceReview.create({
+          data: {
+            serviceId: req.serviceId,
+            requestId: req.id,
+            reviewerId: req.buyerId,
+            creatorId: req.creatorId,
+            rating: rev.rating,
+            comment: rev.comment,
+          },
+        });
+      }
+    }
+
+    // Also add reviews for some other services (using completed requests)
+    const completedRequests = allRequests.slice(0, 5);
+    if (completedRequests.length > 0) {
+      // Add extra reviews by creating them directly for services
+      const allServicesList = await db.serviceListing.findMany();
+      const extraReviews = [
+        { serviceIdx: 0, reviewerIdx: 0, rating: 5, comment: 'Crypto Rogan gave me the best investment advice. Portfolio is up 40%!' },
+        { serviceIdx: 1, reviewerIdx: 1, rating: 4, comment: 'Good analysis video, very detailed. Took a bit longer than expected though.' },
+        { serviceIdx: 6, reviewerIdx: 2, rating: 5, comment: 'Gamer Max helped me climb from Gold to Diamond in just 2 sessions!' },
+        { serviceIdx: 9, reviewerIdx: 3, rating: 5, comment: 'Best cooking class ever! Made the most amazing carbonara.' },
+      ];
+
+      for (const rev of extraReviews) {
+        if (rev.serviceIdx < allServicesList.length) {
+          const service = allServicesList[rev.serviceIdx];
+          // We need a requestId that's unique - use a fake one since these are seed reviews
+          // Actually we need a real completed request. Let's create one just for this review.
+          const tempRequest = await db.serviceRequest.create({
+            data: {
+              serviceId: service.id,
+              buyerId: regularUsers[rev.reviewerIdx].id,
+              creatorId: service.creatorId,
+              message: 'Seed review request',
+              status: 'completed',
+              price: service.price,
+              deliveryMessage: 'Seed delivery message',
+            },
+          });
+
+          const existingRev = await db.serviceReview.findUnique({ where: { requestId: tempRequest.id } });
+          if (!existingRev) {
+            await db.serviceReview.create({
+              data: {
+                serviceId: service.id,
+                requestId: tempRequest.id,
+                reviewerId: regularUsers[rev.reviewerIdx].id,
+                creatorId: service.creatorId,
+                rating: rev.rating,
+                comment: rev.comment,
+              },
+            });
+          }
+        }
+      }
+    }
+
     return NextResponse.json({
-      message: 'Seed data created successfully (Phase 1 + Phase 2)',
+      message: 'Seed data created successfully (Phase 1 + Phase 2 + Phase 3)',
       stats: {
         creators: creators.length,
         users: regularUsers.length,
-        streams: streams.length + privateStreams.length,
+        streams: streams.length + privateStreams.length + 1, // +1 for PK stream
         privateStreams: privateStreams.length,
         serviceListings: serviceData.length,
         serviceRequests: requestData.length,
         streamAccessGrants: 4,
+        subscriptionTiers: tierData.length,
+        subscriptions: subscriptionData.length,
+        pkBattles: 3,
+        serviceReviews: reviewData.length + 4,
       },
     });
   } catch (error) {

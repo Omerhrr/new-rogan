@@ -38,6 +38,12 @@ model User {
   serviceListings  ServiceListing[]
   buyerRequests    ServiceRequest[] @relation("BuyerRequests")
   creatorRequests  ServiceRequest[] @relation("CreatorRequests")
+  pkBattles1     PKBattle[] @relation("PKCreator1")
+  pkBattles2     PKBattle[] @relation("PKCreator2")
+  pkWins         PKBattle[] @relation("PKWinner")
+  writtenReviews ServiceReview[] @relation("WrittenReviews")
+  receivedReviews ServiceReview[] @relation("ReceivedReviews")
+  subscriptionTiers SubscriptionTier[]
 }
 
 model Wallet {
@@ -91,6 +97,7 @@ model Stream {
   chats   ChatMessage[]
   gifts   Gift[]
   accessList  StreamAccess[]
+  pkBattle PKBattle?
 }
 
 model ChatMessage {
@@ -188,6 +195,7 @@ model ServiceListing {
 
   creator   User    @relation(fields: [creatorId], references: [id])
   requests  ServiceRequest[]
+  reviews ServiceReview[]
 }
 
 model ServiceRequest {
@@ -205,6 +213,7 @@ model ServiceRequest {
   service ServiceListing @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   buyer   User @relation("BuyerRequests", fields: [buyerId], references: [id])
   creator User @relation("CreatorRequests", fields: [creatorId], references: [id])
+  review ServiceReview[]
 }
 
 model StreamAccess {
@@ -216,4 +225,55 @@ model StreamAccess {
   stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
 
   @@unique([streamId, userId])
+}
+
+model PKBattle {
+  id            String   @id @default(cuid())
+  streamId      String   @unique
+  creator1Id    String
+  creator2Id    String
+  creator1Score Int      @default(0)
+  creator2Score Int      @default(0)
+  status        String   @default("pending") // pending | active | completed | cancelled
+  duration      Int      @default(300) // seconds
+  startedAt     DateTime?
+  endedAt       DateTime?
+  winnerId      String?
+  createdAt     DateTime @default(now())
+
+  stream   Stream @relation(fields: [streamId], references: [id])
+  creator1 User   @relation("PKCreator1", fields: [creator1Id], references: [id])
+  creator2 User   @relation("PKCreator2", fields: [creator2Id], references: [id])
+  winner   User?  @relation("PKWinner", fields: [winnerId], references: [id])
+}
+
+model ServiceReview {
+  id          String   @id @default(cuid())
+  serviceId   String
+  requestId   String
+  reviewerId  String
+  creatorId   String
+  rating      Int      // 1-5
+  comment     String?
+  createdAt   DateTime @default(now())
+
+  service ServiceListing @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  request ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  reviewer User @relation("WrittenReviews", fields: [reviewerId], references: [id])
+  creator User @relation("ReceivedReviews", fields: [creatorId], references: [id])
+
+  @@unique([requestId])
+}
+
+model SubscriptionTier {
+  id          String   @id @default(cuid())
+  creatorId   String
+  name        String   // e.g. "Basic Fan", "Premium Supporter", "VIP Inner Circle"
+  tier        String   // basic | premium | vip
+  price       Int      // TK per month
+  benefits    String   // JSON array of benefit strings
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  creator User @relation(fields: [creatorId], references: [id])
 }

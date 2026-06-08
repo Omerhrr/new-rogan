@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAuthStore } from '@/stores/authStore';
-import { Coins, TrendingUp, Users, Eye, Gift, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { Coins, TrendingUp, Users, Eye, Gift, Star, Swords, Heart, Crown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 interface DashboardData {
@@ -23,7 +23,38 @@ interface DashboardData {
     sender: { id: string; username: string; displayName: string | null; avatar: string | null };
   }>;
   dailyEarnings: Record<string, number>;
+  // Phase 3
+  subscriberCount: number;
+  recentSubscribers: Array<{
+    id: string;
+    tier: string;
+    price: number;
+    startDate: string;
+    subscriber: { id: string; username: string; displayName: string | null; avatar: string | null };
+  }>;
+  pkBattles: Array<{
+    id: string;
+    creator1Score: number;
+    creator2Score: number;
+    status: string;
+    winnerId: string | null;
+    createdAt: string;
+    creator1: { id: string; username: string; displayName: string | null; avatar: string | null };
+    creator2: { id: string; username: string; displayName: string | null; avatar: string | null };
+    winner: { id: string; username: string; displayName: string | null } | null;
+  }>;
+  pkWins: number;
+  pkTotal: number;
+  avgServiceRating: number;
+  totalReviews: number;
+  tierCount: number;
 }
+
+const TIER_STYLES: Record<string, { bg: string; text: string }> = {
+  basic: { bg: 'bg-gray-500/20', text: 'text-gray-400' },
+  premium: { bg: 'bg-amber-500/20', text: 'text-amber-400' },
+  vip: { bg: 'bg-purple-500/20', text: 'text-purple-400' },
+};
 
 export function CreatorDashboard() {
   const { user } = useAuthStore();
@@ -67,8 +98,8 @@ export function CreatorDashboard() {
           <p className="text-gray-500 text-sm">Welcome back, {user?.displayName || user?.username}</p>
         </div>
 
-        {/* Stats cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        {/* Stats cards - Row 1 */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -122,11 +153,70 @@ export function CreatorDashboard() {
           </motion.div>
         </div>
 
+        {/* Stats cards - Row 2 (Phase 3) */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+            className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Heart className="w-4 h-4 text-red-400" />
+              <span className="text-xs text-gray-500">Subscribers</span>
+            </div>
+            <p className="text-xl font-bold text-white">{data.subscriberCount}</p>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Swords className="w-4 h-4 text-cyan-400" />
+              <span className="text-xs text-gray-500">PK Wins</span>
+            </div>
+            <p className="text-xl font-bold text-white">
+              {data.pkWins}/{data.pkTotal}
+            </p>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.45 }}
+            className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Star className="w-4 h-4 text-amber-400" />
+              <span className="text-xs text-gray-500">Avg Rating</span>
+            </div>
+            <p className="text-xl font-bold text-amber-400">
+              {data.avgServiceRating > 0 ? data.avgServiceRating.toFixed(1) : '-'}
+            </p>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Crown className="w-4 h-4 text-purple-400" />
+              <span className="text-xs text-gray-500">Sub Tiers</span>
+            </div>
+            <p className="text-xl font-bold text-white">{data.tierCount}</p>
+          </motion.div>
+        </div>
+
         {/* Earnings Chart */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
+          transition={{ delay: 0.55 }}
           className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5 mb-6"
         >
           <h3 className="text-white font-semibold mb-4">Earnings (Last 7 Days)</h3>
@@ -151,12 +241,121 @@ export function CreatorDashboard() {
           </div>
         </motion.div>
 
+        {/* Two column layout for bottom sections */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Recent Subscribers */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6 }}
+            className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5"
+          >
+            <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+              <Heart className="w-5 h-5 text-red-400" />
+              Recent Subscribers
+            </h3>
+            <div className="space-y-3 max-h-64 overflow-y-auto">
+              {data.recentSubscribers.length === 0 ? (
+                <p className="text-gray-600 text-sm text-center py-4">No subscribers yet</p>
+              ) : (
+                data.recentSubscribers.map((sub) => {
+                  const style = TIER_STYLES[sub.tier] || TIER_STYLES.basic;
+                  return (
+                    <div
+                      key={sub.id}
+                      className="flex items-center justify-between py-2 border-b border-white/5 last:border-0"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center text-white text-xs font-bold">
+                          {sub.subscriber.displayName?.[0] || sub.subscriber.username[0]}
+                        </div>
+                        <div>
+                          <p className="text-white text-sm font-medium">
+                            {sub.subscriber.displayName || sub.subscriber.username}
+                          </p>
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${style.bg} ${style.text}`}>
+                            {sub.tier}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-amber-400 text-xs font-bold">{(sub.price / 100).toFixed(0)} TK/mo</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </motion.div>
+
+          {/* PK Battle History */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.65 }}
+            className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5"
+          >
+            <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+              <Swords className="w-5 h-5 text-cyan-400" />
+              PK Battle History
+            </h3>
+            <div className="space-y-3 max-h-64 overflow-y-auto">
+              {data.pkBattles.length === 0 ? (
+                <p className="text-gray-600 text-sm text-center py-4">No PK battles yet</p>
+              ) : (
+                data.pkBattles.map((battle) => {
+                  const isCreator1 = battle.creator1.id === user?.id;
+                  const myScore = isCreator1 ? battle.creator1Score : battle.creator2Score;
+                  const oppScore = isCreator1 ? battle.creator2Score : battle.creator1Score;
+                  const opponent = isCreator1 ? battle.creator2 : battle.creator1;
+                  const isWin = battle.winnerId === user?.id;
+                  const isDraw = battle.status === 'completed' && !battle.winnerId;
+
+                  return (
+                    <div
+                      key={battle.id}
+                      className="py-2 border-b border-white/5 last:border-0"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center text-white text-[10px] font-bold">
+                            {opponent.displayName?.[0] || opponent.username[0]}
+                          </div>
+                          <span className="text-white text-xs font-medium">
+                            vs {opponent.displayName || opponent.username}
+                          </span>
+                        </div>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          battle.status === 'active'
+                            ? 'bg-green-500/20 text-green-400'
+                            : battle.status === 'pending'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : isWin
+                            ? 'bg-green-500/20 text-green-400'
+                            : isDraw
+                            ? 'bg-gray-500/20 text-gray-400'
+                            : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {battle.status === 'completed' ? (isWin ? 'WIN' : isDraw ? 'DRAW' : 'LOSS') : battle.status.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-red-400 font-bold">{myScore}</span>
+                        <span className="text-gray-600">vs</span>
+                        <span className="text-blue-400 font-bold">{oppScore}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </motion.div>
+        </div>
+
         {/* Recent Gifts */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5"
+          transition={{ delay: 0.7 }}
+          className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5 mt-6"
         >
           <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
             <Gift className="w-5 h-5 text-red-400" />

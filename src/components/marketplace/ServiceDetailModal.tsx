@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Star, Clock, User, Send, Loader2, Shield } from 'lucide-react';
+import { X, Star, Clock, Send, Loader2, Shield, MessageSquare } from 'lucide-react';
+import { ReviewList } from './ReviewList';
 
 interface ServiceCreator {
   id: string;
@@ -50,9 +51,12 @@ const CATEGORY_COLORS: Record<string, string> = {
   other: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
 };
 
+type DetailTab = 'details' | 'reviews';
+
 export function ServiceDetailModal({ service, isOpen, onClose, onRequest }: ServiceDetailModalProps) {
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState<DetailTab>('details');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,68 +101,95 @@ export function ServiceDetailModal({ service, isOpen, onClose, onRequest }: Serv
           </button>
         </div>
 
+        {/* Tabs */}
+        <div className="flex items-center gap-1 p-2 px-4 bg-white/5">
+          <button
+            onClick={() => setActiveTab('details')}
+            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'details' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Details
+          </button>
+          <button
+            onClick={() => setActiveTab('reviews')}
+            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
+              activeTab === 'reviews' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <MessageSquare className="w-3 h-3" />
+            Reviews ({service.reviewCount})
+          </button>
+        </div>
+
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Creator Info */}
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center text-white font-bold text-lg">
-                {service.creator.displayName?.[0] || service.creator.username[0]}
+          {activeTab === 'details' ? (
+            <>
+              {/* Creator Info */}
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center text-white font-bold text-lg">
+                    {service.creator.displayName?.[0] || service.creator.username[0]}
+                  </div>
+                  {service.creator.isLive && (
+                    <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full border-2 border-[#1A1A1A]" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-white font-semibold text-sm">
+                    {service.creator.displayName || service.creator.username}
+                  </p>
+                  <p className="text-gray-500 text-xs">@{service.creator.username}</p>
+                </div>
               </div>
-              {service.creator.isLive && (
-                <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full border-2 border-[#1A1A1A]" />
-              )}
-            </div>
-            <div>
-              <p className="text-white font-semibold text-sm">
-                {service.creator.displayName || service.creator.username}
-              </p>
-              <p className="text-gray-500 text-xs">@{service.creator.username}</p>
-            </div>
-          </div>
 
-          {/* Title & Description */}
-          <div>
-            <h3 className="text-white font-bold text-xl">{service.title}</h3>
-            <p className="text-gray-400 text-sm mt-2 leading-relaxed">{service.description}</p>
-          </div>
-
-          {/* Tags */}
-          <div className="flex flex-wrap gap-2">
-            <span className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${CATEGORY_COLORS[service.category] || CATEGORY_COLORS.other}`}>
-              {CATEGORY_LABELS[service.category] || service.category}
-            </span>
-          </div>
-
-          {/* Stats */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white/5 rounded-xl p-3 text-center">
-              <p className="text-amber-400 font-bold text-lg">{priceInTk}</p>
-              <p className="text-gray-500 text-xs">TK</p>
-            </div>
-            <div className="bg-white/5 rounded-xl p-3 text-center">
-              <div className="flex items-center justify-center gap-1">
-                <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
-                <span className="text-white font-bold text-lg">{service.rating > 0 ? service.rating.toFixed(1) : '-'}</span>
+              {/* Title & Description */}
+              <div>
+                <h3 className="text-white font-bold text-xl">{service.title}</h3>
+                <p className="text-gray-400 text-sm mt-2 leading-relaxed">{service.description}</p>
               </div>
-              <p className="text-gray-500 text-xs">{service.reviewCount} reviews</p>
-            </div>
-            <div className="bg-white/5 rounded-xl p-3 text-center">
-              <div className="flex items-center justify-center gap-1">
-                <Clock className="w-4 h-4 text-cyan-400" />
-                <span className="text-white font-bold text-lg">{service.deliveryDays}</span>
-              </div>
-              <p className="text-gray-500 text-xs">days</p>
-            </div>
-          </div>
 
-          {/* Secure payment note */}
-          <div className="flex items-start gap-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-            <Shield className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-            <p className="text-amber-400/80 text-xs leading-relaxed">
-              Payment is held securely until you confirm the service is delivered. Full refund if cancelled before delivery.
-            </p>
-          </div>
+              {/* Tags */}
+              <div className="flex flex-wrap gap-2">
+                <span className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${CATEGORY_COLORS[service.category] || CATEGORY_COLORS.other}`}>
+                  {CATEGORY_LABELS[service.category] || service.category}
+                </span>
+              </div>
+
+              {/* Stats */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-white/5 rounded-xl p-3 text-center">
+                  <p className="text-amber-400 font-bold text-lg">{priceInTk}</p>
+                  <p className="text-gray-500 text-xs">TK</p>
+                </div>
+                <div className="bg-white/5 rounded-xl p-3 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+                    <span className="text-white font-bold text-lg">{service.rating > 0 ? service.rating.toFixed(1) : '-'}</span>
+                  </div>
+                  <p className="text-gray-500 text-xs">{service.reviewCount} reviews</p>
+                </div>
+                <div className="bg-white/5 rounded-xl p-3 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <Clock className="w-4 h-4 text-cyan-400" />
+                    <span className="text-white font-bold text-lg">{service.deliveryDays}</span>
+                  </div>
+                  <p className="text-gray-500 text-xs">days</p>
+                </div>
+              </div>
+
+              {/* Secure payment note */}
+              <div className="flex items-start gap-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+                <Shield className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                <p className="text-amber-400/80 text-xs leading-relaxed">
+                  Payment is held securely until you confirm the service is delivered. Full refund if cancelled before delivery.
+                </p>
+              </div>
+            </>
+          ) : (
+            <ReviewList serviceId={service.id} />
+          )}
         </div>
 
         {/* Request Form */}

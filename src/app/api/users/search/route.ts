@@ -10,25 +10,34 @@ export async function GET(req: NextRequest) {
     }
 
     const q = req.nextUrl.searchParams.get('q') || '';
-    if (q.length < 2) {
-      return NextResponse.json({ users: [] });
+    const role = req.nextUrl.searchParams.get('role') || '';
+
+    const where: Record<string, unknown> = {
+      id: { not: user.id },
+    };
+
+    if (role) {
+      where.role = role;
+    }
+
+    if (q.length >= 2) {
+      where.OR = [
+        { username: { contains: q } },
+        { displayName: { contains: q } },
+      ];
     }
 
     const users = await db.user.findMany({
-      where: {
-        id: { not: user.id },
-        OR: [
-          { username: { contains: q } },
-          { displayName: { contains: q } },
-        ],
-      },
+      where,
       select: {
         id: true,
         username: true,
         displayName: true,
         avatar: true,
+        role: true,
+        isLive: true,
       },
-      take: 10,
+      take: 20,
     });
 
     return NextResponse.json({ users });

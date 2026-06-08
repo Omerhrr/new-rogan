@@ -65,6 +65,61 @@ export async function GET() {
       where: { userId: user.id },
     });
 
+    // ===== Phase 3: Subscriber data =====
+    const subscriberCount = await db.subscription.count({
+      where: { creatorId: user.id, isActive: true },
+    });
+
+    const recentSubscribers = await db.subscription.findMany({
+      where: { creatorId: user.id, isActive: true },
+      include: {
+        subscriber: { select: { id: true, username: true, displayName: true, avatar: true } },
+      },
+      orderBy: { startDate: 'desc' },
+      take: 5,
+    });
+
+    // ===== Phase 3: PK Battle history =====
+    const pkBattles = await db.pKBattle.findMany({
+      where: {
+        OR: [{ creator1Id: user.id }, { creator2Id: user.id }],
+      },
+      include: {
+        creator1: { select: { id: true, username: true, displayName: true, avatar: true } },
+        creator2: { select: { id: true, username: true, displayName: true, avatar: true } },
+        winner: { select: { id: true, username: true, displayName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+
+    const pkWins = await db.pKBattle.count({
+      where: { winnerId: user.id },
+    });
+
+    const pkTotal = await db.pKBattle.count({
+      where: {
+        OR: [{ creator1Id: user.id }, { creator2Id: user.id }],
+        status: 'completed',
+      },
+    });
+
+    // ===== Phase 3: Average service rating =====
+    const services = await db.serviceListing.findMany({
+      where: { creatorId: user.id },
+      select: { rating: true, reviewCount: true },
+    });
+
+    const totalReviews = services.reduce((sum, s) => sum + s.reviewCount, 0);
+    const avgServiceRating = services.length > 0
+      ? services.reduce((sum, s) => sum + s.rating * s.reviewCount, 0) / Math.max(totalReviews, 1)
+      : 0;
+
+    // Active subscription tiers count
+    const tierCount = await db.subscriptionTier.count({
+      where: { creatorId: user.id, isActive: true },
+    });
+
     return NextResponse.json({
       totalEarned,
       thisMonthEarned,
@@ -75,6 +130,15 @@ export async function GET() {
       totalStreams,
       recentGifts,
       dailyEarnings,
+      // Phase 3 additions
+      subscriberCount,
+      recentSubscribers,
+      pkBattles,
+      pkWins,
+      pkTotal,
+      avgServiceRating: Math.round(avgServiceRating * 10) / 10,
+      totalReviews,
+      tierCount,
     });
   } catch (error) {
     console.error('Creator dashboard error:', error);

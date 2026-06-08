@@ -17,6 +17,8 @@ import { WalletView } from '@/components/wallet/WalletView';
 import { DMView } from '@/components/dm/DMView';
 import { ProfileView } from '@/components/profile/ProfileView';
 import { MarketplaceView } from '@/components/marketplace/MarketplaceView';
+import { PKBattleArena } from '@/components/pk/PKBattleArena';
+import { SubscriptionsView } from '@/components/subscriptions/SubscriptionsView';
 import { BottomNav, type ViewType } from '@/components/shared/BottomNav';
 import { Sidebar } from '@/components/shared/Sidebar';
 
@@ -140,6 +142,10 @@ export default function HomePage() {
         return <GoLiveView onStreamStarted={handleEnterStream} emitSocket={emit} />;
       case 'dashboard':
         return <CreatorDashboard />;
+      case 'pk':
+        return <PKBattleArena />;
+      case 'subscriptions':
+        return <SubscriptionsView />;
       case 'messages':
         return <DMView />;
       case 'marketplace':

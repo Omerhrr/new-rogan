@@ -1,6 +1,6 @@
 'use client';
 
-import { Home, PlusCircle, MessageCircle, User, Wallet, Briefcase, LayoutDashboard, LogOut } from 'lucide-react';
+import { Home, PlusCircle, MessageCircle, User, Wallet, Briefcase, LayoutDashboard, LogOut, Swords, Heart } from 'lucide-react';
 import type { ViewType } from './BottomNav';
 
 interface SidebarProps {
@@ -17,8 +17,10 @@ export function Sidebar({ activeView, onViewChange, onLogout, username, isCreato
     { view: 'feed', icon: Home, label: 'Live Feed' },
     { view: 'golive', icon: PlusCircle, label: 'Go Live' },
     ...(isCreator ? [{ view: 'dashboard' as ViewType, icon: LayoutDashboard, label: 'Dashboard' }] : []),
+    { view: 'pk', icon: Swords, label: 'PK Battles' },
     { view: 'messages', icon: MessageCircle, label: 'Messages' },
     { view: 'marketplace', icon: Briefcase, label: 'Marketplace' },
+    { view: 'subscriptions', icon: Heart, label: 'Subscriptions' },
     { view: 'wallet', icon: Wallet, label: 'Wallet' },
     { view: 'profile', icon: User, label: 'Profile' },
   ];
