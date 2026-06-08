@@ -88,6 +88,10 @@ export function AuthView() {
                     className="w-full px-4 py-3 bg-[#111] border border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50 transition-all"
                     placeholder="coolstreamer42"
                     required={!isLogin}
+                    minLength={3}
+                    maxLength={30}
+                    pattern="[a-zA-Z0-9_]+"
+                    title="Letters, numbers, and underscores only"
                   />
                 </motion.div>
               )}
@@ -102,8 +106,12 @@ export function AuthView() {
                 className="w-full px-4 py-3 bg-[#111] border border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50 transition-all"
                 placeholder="••••••••"
                 required
-                minLength={6}
+                minLength={8}
+                maxLength={128}
               />
+              {!isLogin && (
+                <p className="text-xs text-gray-600 mt-1">Min 8 characters</p>
+              )}
             </div>
 
             {error && (
@@ -135,14 +143,14 @@ export function AuthView() {
             </button>
           </form>
 
-          <div className="mt-6 text-center">
-            <p className="text-xs text-gray-600">
-              Demo: login with any seeded account
-            </p>
-            <p className="text-xs text-gray-600 mt-1">
-              e.g. rogan@example.com / password123
-            </p>
-          </div>
+          {/* SECURITY: Demo credentials only shown in development */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-6 text-center">
+              <p className="text-xs text-gray-600">
+                Dev Mode: use admin@rogan.live / password123
+              </p>
+            </div>
+          )}
         </div>
       </motion.div>
     </div>

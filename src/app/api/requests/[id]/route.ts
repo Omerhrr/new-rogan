@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest } from '@/lib/auth';
+import { getUserFromRequest, sanitizeString } from '@/lib/auth';
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -64,49 +64,53 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const updateData: Record<string, unknown> = { status };
     if (status === 'delivered' && deliveryMessage) {
-      updateData.deliveryMessage = deliveryMessage;
+      updateData.deliveryMessage = sanitizeString(deliveryMessage, 2000);
     }
 
-    // Handle completion: release funds to creator (minus 10% platform fee)
+    // SECURITY: Wrap financial operations in transaction for atomicity
     if (status === 'completed') {
       const platformFee = Math.floor(existing.price * 0.1);
       const creatorPayout = existing.price - platformFee;
 
-      await db.ledgerAccount.upsert({
-        where: { userId: existing.creatorId },
-        update: { tkBalance: { increment: creatorPayout } },
-        create: { userId: existing.creatorId, tkBalance: creatorPayout },
-      });
+      await db.$transaction(async (tx) => {
+        await tx.ledgerAccount.upsert({
+          where: { userId: existing.creatorId },
+          update: { tkBalance: { increment: creatorPayout } },
+          create: { userId: existing.creatorId, tkBalance: creatorPayout },
+        });
 
-      await db.transaction.create({
-        data: {
-          type: 'service_payout',
-          amount: creatorPayout,
-          fromUserId: existing.buyerId,
-          toUserId: existing.creatorId,
-          referenceId: existing.id,
-          metadata: JSON.stringify({ platformFee, originalPrice: existing.price }),
-        },
+        await tx.transaction.create({
+          data: {
+            type: 'service_payout',
+            amount: creatorPayout,
+            fromUserId: existing.buyerId,
+            toUserId: existing.creatorId,
+            referenceId: existing.id,
+            metadata: JSON.stringify({ platformFee, originalPrice: existing.price }),
+          },
+        });
       });
     }
 
-    // Handle cancellation: refund buyer
+    // SECURITY: Wrap refund in transaction
     if (status === 'cancelled') {
-      await db.ledgerAccount.upsert({
-        where: { userId: existing.buyerId },
-        update: { tkBalance: { increment: existing.price } },
-        create: { userId: existing.buyerId, tkBalance: existing.price },
-      });
+      await db.$transaction(async (tx) => {
+        await tx.ledgerAccount.upsert({
+          where: { userId: existing.buyerId },
+          update: { tkBalance: { increment: existing.price } },
+          create: { userId: existing.buyerId, tkBalance: existing.price },
+        });
 
-      await db.transaction.create({
-        data: {
-          type: 'service_refund',
-          amount: existing.price,
-          fromUserId: existing.creatorId,
-          toUserId: existing.buyerId,
-          referenceId: existing.id,
-          metadata: JSON.stringify({ reason: 'cancelled' }),
-        },
+        await tx.transaction.create({
+          data: {
+            type: 'service_refund',
+            amount: existing.price,
+            fromUserId: existing.creatorId,
+            toUserId: existing.buyerId,
+            referenceId: existing.id,
+            metadata: JSON.stringify({ reason: 'cancelled' }),
+          },
+        });
       });
     }
 

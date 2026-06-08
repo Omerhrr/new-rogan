@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getUserFromRequest } from '@/lib/auth';
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ username: string }> }) {
   try {
@@ -27,20 +28,37 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       where: { followingId: user.id },
     });
 
-    const totalEarned = await db.gift.aggregate({
-      where: { receiverId: user.id },
-      _sum: { amount: true },
-    });
+    // SECURITY: Only show earnings to the creator themselves or admin
+    const currentUser = await getUserFromRequest();
+    const canSeeEarnings = currentUser && (currentUser.id === user.id || currentUser.role === 'admin');
 
+    const totalEarned = canSeeEarnings
+      ? (await db.gift.aggregate({
+          where: { receiverId: user.id },
+          _sum: { amount: true },
+        }))._sum.amount || 0
+      : null;
+
+    // SECURITY: Exclude streamKey from the response
     const streams = await db.stream.findMany({
       where: { creatorId: user.id, isLive: true },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        isLive: true,
+        isPrivate: true,
+        viewerCount: true,
+        startedAt: true,
+        // streamKey intentionally excluded
+      },
       take: 1,
     });
 
     return NextResponse.json({
       creator: user,
       followerCount,
-      totalEarned: totalEarned._sum.amount || 0,
+      totalEarned,
       currentStream: streams[0] || null,
     });
   } catch (error) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest } from '@/lib/auth';
+import { getUserFromRequest, sanitizeString } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,7 +14,11 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = { isActive: true };
     if (category && category !== 'all') {
-      where.category = category;
+      // SECURITY: Validate category to prevent injection
+      const validCategories = ['video_call', 'custom_video', 'shoutout', 'coaching', 'other'];
+      if (validCategories.includes(category)) {
+        where.category = category;
+      }
     }
 
     const services = await db.serviceListing.findMany({
@@ -25,6 +29,7 @@ export async function GET(request: NextRequest) {
         },
       },
       orderBy: { createdAt: 'desc' },
+      take: 50, // SECURITY: Limit results
     });
 
     return NextResponse.json({ services });
@@ -52,19 +57,38 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Title, description, category, and price are required' }, { status: 400 });
     }
 
+    // SECURITY: Validate and sanitize inputs
+    const sanitizedTitle = sanitizeString(title, 100);
+    const sanitizedDescription = sanitizeString(description, 2000);
+
+    if (!sanitizedTitle || !sanitizedDescription) {
+      return NextResponse.json({ error: 'Title and description cannot be empty' }, { status: 400 });
+    }
+
     const validCategories = ['video_call', 'custom_video', 'shoutout', 'coaching', 'other'];
     if (!validCategories.includes(category)) {
       return NextResponse.json({ error: 'Invalid category' }, { status: 400 });
     }
 
+    // SECURITY: Validate price is a reasonable number
+    if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0 || price > 100000) {
+      return NextResponse.json({ error: 'Price must be between 1 and 100,000 TK' }, { status: 400 });
+    }
+
+    // SECURITY: Validate deliveryDays
+    const deliveryDaysNum = typeof deliveryDays === 'number' ? deliveryDays : 3;
+    if (deliveryDaysNum < 1 || deliveryDaysNum > 90) {
+      return NextResponse.json({ error: 'Delivery days must be between 1 and 90' }, { status: 400 });
+    }
+
     const service = await db.serviceListing.create({
       data: {
         creatorId: user.id,
-        title,
-        description,
+        title: sanitizedTitle,
+        description: sanitizedDescription,
         category,
-        price: price * 100, // Convert TK to units
-        deliveryDays: deliveryDays || 3,
+        price: Math.floor(price * 100), // Convert TK to units
+        deliveryDays: deliveryDaysNum,
       },
       include: {
         creator: {

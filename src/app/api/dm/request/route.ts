@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest } from '@/lib/auth';
+import { getUserFromRequest, sanitizeString } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,6 +14,23 @@ export async function POST(request: NextRequest) {
 
     if (!receiverId || !message) {
       return NextResponse.json({ error: 'receiverId and message are required' }, { status: 400 });
+    }
+
+    // SECURITY: Verify receiver exists
+    const receiver = await db.user.findUnique({ where: { id: receiverId }, select: { id: true } });
+    if (!receiver) {
+      return NextResponse.json({ error: 'Recipient not found' }, { status: 404 });
+    }
+
+    // SECURITY: Prevent DMing yourself
+    if (receiverId === user.id) {
+      return NextResponse.json({ error: 'Cannot send a message to yourself' }, { status: 400 });
+    }
+
+    // SECURITY: Sanitize message
+    const sanitizedMessage = sanitizeString(message, 1000);
+    if (!sanitizedMessage) {
+      return NextResponse.json({ error: 'Message cannot be empty' }, { status: 400 });
     }
 
     // Check if they already have a conversation (follow each other or have exchanged DMs)
@@ -32,22 +49,24 @@ export async function POST(request: NextRequest) {
         data: {
           senderId: user.id,
           receiverId,
-          message,
+          message: sanitizedMessage,
         },
         include: {
           sender: { select: { id: true, username: true, displayName: true, avatar: true } },
         },
       });
 
-      await db.notification.create({
-        data: {
-          userId: receiverId,
-          type: 'dm_received',
-          title: 'New Message',
-          message: `${user.username} sent you a message`,
-          metadata: JSON.stringify({ dmId: dm.id }),
-        },
-      });
+      try {
+        await db.notification.create({
+          data: {
+            userId: receiverId,
+            type: 'dm_received',
+            title: 'New Message',
+            message: `${user.username} sent you a message`,
+            metadata: JSON.stringify({ dmId: dm.id }),
+          },
+        });
+      } catch { /* non-critical */ }
 
       return NextResponse.json({ message: dm, wasRequest: false }, { status: 201 });
     }
@@ -67,33 +86,34 @@ export async function POST(request: NextRequest) {
         data: {
           senderId: user.id,
           receiverId,
-          message,
+          message: sanitizedMessage,
         },
         include: {
           sender: { select: { id: true, username: true, displayName: true, avatar: true } },
         },
       });
 
-      await db.notification.create({
-        data: {
-          userId: receiverId,
-          type: 'dm_received',
-          title: 'New Message',
-          message: `${user.username} sent you a message`,
-          metadata: JSON.stringify({ dmId: dm.id }),
-        },
-      });
+      try {
+        await db.notification.create({
+          data: {
+            userId: receiverId,
+            type: 'dm_received',
+            title: 'New Message',
+            message: `${user.username} sent you a message`,
+            metadata: JSON.stringify({ dmId: dm.id }),
+          },
+        });
+      } catch { /* non-critical */ }
 
       return NextResponse.json({ message: dm, wasRequest: false }, { status: 201 });
     }
 
-    // Not following each other - create a DM request (still send as DM but with metadata)
-    // For MVP, we'll still create the DM but mark it with a special notification
+    // Not following each other - create a DM request
     const dm = await db.directMessage.create({
       data: {
         senderId: user.id,
         receiverId,
-        message,
+        message: sanitizedMessage,
         isPaid: false,
         price: 0,
       },
@@ -102,15 +122,17 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    await db.notification.create({
-      data: {
-        userId: receiverId,
-        type: 'dm_received',
-        title: 'Message Request',
-        message: `${user.username} wants to message you: "${message.substring(0, 50)}"`,
-        metadata: JSON.stringify({ dmId: dm.id, isRequest: true, senderId: user.id }),
-      },
-    });
+    try {
+      await db.notification.create({
+        data: {
+          userId: receiverId,
+          type: 'dm_received',
+          title: 'Message Request',
+          message: `${user.username} wants to message you: "${sanitizedMessage.substring(0, 50)}"`,
+          metadata: JSON.stringify({ dmId: dm.id, isRequest: true, senderId: user.id }),
+        },
+      });
+    } catch { /* non-critical */ }
 
     return NextResponse.json({ message: dm, wasRequest: true }, { status: 201 });
   } catch (error) {

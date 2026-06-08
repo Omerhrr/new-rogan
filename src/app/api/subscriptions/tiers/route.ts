@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest } from '@/lib/auth';
+import { getUserFromRequest, sanitizeString } from '@/lib/auth';
 
 // GET - List subscription tiers
 // If creatorId is provided, return tiers for that creator
@@ -34,6 +34,7 @@ export async function GET(request: Request) {
           select: { id: true, username: true, displayName: true, avatar: true, isLive: true },
         },
       },
+      take: 50, // SECURITY: Limit results
     });
 
     return NextResponse.json({ tiers });
@@ -61,13 +62,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Tier must be basic, premium, or vip' }, { status: 400 });
     }
 
+    // SECURITY: Validate and sanitize name
+    const sanitizedName = sanitizeString(name, 50);
+    if (!sanitizedName) {
+      return NextResponse.json({ error: 'Tier name cannot be empty' }, { status: 400 });
+    }
+
+    // SECURITY: Validate price — must be positive and reasonable
+    if (typeof price !== 'number' || !Number.isFinite(price) || price < 100 || price > 10000000) {
+      return NextResponse.json({ error: 'Price must be between 1 and 100,000 TK' }, { status: 400 });
+    }
+
+    // SECURITY: Validate benefits array
+    const safeBenefits = Array.isArray(benefits)
+      ? benefits.filter((b: unknown) => typeof b === 'string').map((b: string) => sanitizeString(b, 100)).filter(Boolean).slice(0, 10)
+      : [];
+
     const subscriptionTier = await db.subscriptionTier.create({
       data: {
         creatorId: user.id,
-        name,
+        name: sanitizedName,
         tier,
-        price: Math.max(0, price),
-        benefits: JSON.stringify(benefits || []),
+        price: Math.floor(price),
+        benefits: JSON.stringify(safeBenefits),
         isActive: true,
       },
       include: {

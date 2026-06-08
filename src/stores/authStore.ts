@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 
+// SECURITY: Don't store email (PII) in client-side state
 interface User {
   id: string;
-  email: string;
   username: string;
   displayName: string | null;
   avatar: string | null;
@@ -39,7 +39,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Login failed');
-      set({ user: data.user, isAuthenticated: true, isLoading: false });
+      // SECURITY: Don't store email/PII in client state
+      const { id, username, displayName, avatar, bio, role } = data.user;
+      set({ user: { id, username, displayName, avatar, bio, role }, isAuthenticated: true, isLoading: false });
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
     }
@@ -55,7 +57,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Registration failed');
-      set({ user: data.user, isAuthenticated: true, isLoading: false });
+      const { id, username: uname, displayName, avatar, bio, role } = data.user;
+      set({ user: { id, username: uname, displayName, avatar, bio, role }, isAuthenticated: true, isLoading: false });
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
     }
@@ -75,7 +78,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       const res = await fetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
-        set({ user: data.user, isAuthenticated: true, isLoading: false });
+        const { id, username, displayName, avatar, bio, role } = data.user;
+        set({ user: { id, username, displayName, avatar, bio, role }, isAuthenticated: true, isLoading: false });
       } else {
         set({ user: null, isAuthenticated: false, isLoading: false });
       }

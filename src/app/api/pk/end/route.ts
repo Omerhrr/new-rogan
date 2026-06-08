@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json();
-    const { battleId, creator1Score, creator2Score } = body;
+    const { battleId } = body;
 
     if (!battleId) return NextResponse.json({ error: 'battleId is required' }, { status: 400 });
 
@@ -18,12 +18,13 @@ export async function POST(request: Request) {
     if (battle.status !== 'active') return NextResponse.json({ error: 'Battle is not active' }, { status: 400 });
 
     // Only participants can end the battle
-    if (battle.creator1Id !== user.id && battle.creator2Id !== user.id) {
+    if (battle.creator1Id !== user.id && battle.creator2Id !== user.id && user.role !== 'admin') {
       return NextResponse.json({ error: 'Only participants can end the battle' }, { status: 403 });
     }
 
-    const c1Score = creator1Score ?? battle.creator1Score;
-    const c2Score = creator2Score ?? battle.creator2Score;
+    // SECURITY: Compute scores server-side from authoritative battle state — reject client-submitted scores
+    const c1Score = battle.creator1Score;
+    const c2Score = battle.creator2Score;
     const winnerId = c1Score > c2Score ? battle.creator1Id : c2Score > c1Score ? battle.creator2Id : null;
 
     const updatedBattle = await db.pKBattle.update({

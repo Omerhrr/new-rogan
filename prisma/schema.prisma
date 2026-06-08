@@ -66,16 +66,21 @@ model LedgerAccount {
 
 model Transaction {
   id          String   @id @default(cuid())
-  type        String   // deposit | withdraw | gift_send | gift_receive | dm_payment | subscription
+  type        String   // deposit | withdraw | gift_send | gift_receive | dm_payment | subscription | service_purchase | service_payout | service_refund
   amount      Int      // amount in TK units
-  fromUserId  String
-  toUserId    String
+  fromUserId  String?
+  toUserId    String?
   referenceId String?  // gift_id, dm_id, etc.
   metadata    String?  // JSON string for extra data
   createdAt   DateTime @default(now())
 
-  fromUser User @relation("SentTransactions", fields: [fromUserId], references: [id])
-  toUser   User @relation("ReceivedTransactions", fields: [toUserId], references: [id])
+  fromUser User? @relation("SentTransactions", fields: [fromUserId], references: [id], onDelete: SetNull)
+  toUser   User? @relation("ReceivedTransactions", fields: [toUserId], references: [id], onDelete: SetNull)
+
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([createdAt])
+  @@index([type])
 }
 
 model Stream {
@@ -93,11 +98,14 @@ model Stream {
   endedAt     DateTime?
   createdAt   DateTime @default(now())
 
-  creator User @relation(fields: [creatorId], references: [id])
+  creator User @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   chats   ChatMessage[]
   gifts   Gift[]
   accessList  StreamAccess[]
   pkBattle PKBattle?
+
+  @@index([creatorId])
+  @@index([isLive])
 }
 
 model ChatMessage {
@@ -109,21 +117,29 @@ model ChatMessage {
   createdAt DateTime @default(now())
 
   stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+
+  @@index([streamId])
+  @@index([createdAt])
 }
 
 model Gift {
   id         String   @id @default(cuid())
   streamId   String
-  senderId   String
-  receiverId String
+  senderId   String?
+  receiverId String?
   giftType   String   // rose | diamond | crown | fire | heart
   amount     Int      // TK amount
   message    String?
   createdAt  DateTime @default(now())
 
-  sender   User   @relation(fields: [senderId], references: [id])
-  receiver User   @relation("ReceivedGifts", fields: [receiverId], references: [id])
+  sender   User?   @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  receiver User?   @relation("ReceivedGifts", fields: [receiverId], references: [id], onDelete: SetNull)
   stream   Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([streamId])
+  @@index([createdAt])
 }
 
 model DirectMessage {
@@ -136,8 +152,12 @@ model DirectMessage {
   isRead      Boolean  @default(false)
   createdAt   DateTime @default(now())
 
-  sender   User @relation("SentDMs", fields: [senderId], references: [id])
-  receiver User @relation("ReceivedDMs", fields: [receiverId], references: [id])
+  sender   User @relation("SentDMs", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedDMs", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
 }
 
 model Notification {
@@ -151,6 +171,9 @@ model Notification {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
 }
 
 model Follow {
@@ -159,10 +182,11 @@ model Follow {
   followingId String
   createdAt  DateTime @default(now())
 
-  follower  User @relation("Followers", fields: [followerId], references: [id])
-  following User @relation("Following", fields: [followingId], references: [id])
+  follower  User @relation("Followers", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followingId])
+  @@index([followingId])
 }
 
 model Subscription {
@@ -175,8 +199,13 @@ model Subscription {
   startDate  DateTime @default(now())
   endDate    DateTime?
 
-  subscriber User @relation("Subscriber", fields: [subscriberId], references: [id])
-  creator    User @relation("CreatorSubscriptions", fields: [creatorId], references: [id])
+  subscriber User @relation("Subscriber", fields: [subscriberId], references: [id], onDelete: Cascade)
+  creator    User @relation("CreatorSubscriptions", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriberId, creatorId])
+  @@index([creatorId])
+  @@index([subscriberId])
+  @@index([isActive])
 }
 
 model ServiceListing {
@@ -193,9 +222,13 @@ model ServiceListing {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  creator   User    @relation(fields: [creatorId], references: [id])
+  creator   User    @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   requests  ServiceRequest[]
   reviews ServiceReview[]
+
+  @@index([creatorId])
+  @@index([category])
+  @@index([isActive])
 }
 
 model ServiceRequest {
@@ -211,9 +244,14 @@ model ServiceRequest {
   updatedAt   DateTime @updatedAt
 
   service ServiceListing @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  buyer   User @relation("BuyerRequests", fields: [buyerId], references: [id])
-  creator User @relation("CreatorRequests", fields: [creatorId], references: [id])
+  buyer   User @relation("BuyerRequests", fields: [buyerId], references: [id], onDelete: Cascade)
+  creator User @relation("CreatorRequests", fields: [creatorId], references: [id], onDelete: Cascade)
   review ServiceReview[]
+
+  @@index([buyerId])
+  @@index([creatorId])
+  @@index([serviceId])
+  @@index([status])
 }
 
 model StreamAccess {
@@ -225,6 +263,7 @@ model StreamAccess {
   stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
 
   @@unique([streamId, userId])
+  @@index([userId])
 }
 
 model PKBattle {
@@ -241,10 +280,14 @@ model PKBattle {
   winnerId      String?
   createdAt     DateTime @default(now())
 
-  stream   Stream @relation(fields: [streamId], references: [id])
-  creator1 User   @relation("PKCreator1", fields: [creator1Id], references: [id])
-  creator2 User   @relation("PKCreator2", fields: [creator2Id], references: [id])
+  stream   Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  creator1 User   @relation("PKCreator1", fields: [creator1Id], references: [id], onDelete: Cascade)
+  creator2 User   @relation("PKCreator2", fields: [creator2Id], references: [id], onDelete: Cascade)
   winner   User?  @relation("PKWinner", fields: [winnerId], references: [id])
+
+  @@index([status])
+  @@index([creator1Id])
+  @@index([creator2Id])
 }
 
 model ServiceReview {
@@ -259,10 +302,12 @@ model ServiceReview {
 
   service ServiceListing @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   request ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  reviewer User @relation("WrittenReviews", fields: [reviewerId], references: [id])
-  creator User @relation("ReceivedReviews", fields: [creatorId], references: [id])
+  reviewer User @relation("WrittenReviews", fields: [reviewerId], references: [id], onDelete: Cascade)
+  creator User @relation("ReceivedReviews", fields: [creatorId], references: [id], onDelete: Cascade)
 
   @@unique([requestId])
+  @@index([serviceId])
+  @@index([creatorId])
 }
 
 model SubscriptionTier {
@@ -275,5 +320,8 @@ model SubscriptionTier {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  creator User @relation(fields: [creatorId], references: [id])
+  creator User @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId])
+  @@index([tier])
 }
