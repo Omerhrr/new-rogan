@@ -36,19 +36,34 @@ yarn-error.log*
 # vercel
 .vercel
 
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Platform / tooling artifacts (NOT part of the project)
+/skills/
+/examples/
+/agent-ctx/
+/.zscripts/
+/download/
+/upload/
+/db/
+worklog.md
+worklog_phase2.md
 local-*
 .claude
 .z-ai-config
+
+# Logs
 *.log
 dev.log
 dev.out.log
+server.log
 test
 prompt
 
-server.log
-# Skills directory
-/skills/
+# Lock files (regenerate with your package manager)
+bun.lock
+
+# Caddy reverse proxy config (deployment-specific)
+Caddyfile
