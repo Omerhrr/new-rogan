@@ -19,30 +19,47 @@ export function useSocket(userId?: string) {
     }
 
     if (!socketRef.current) {
-      // SECURITY: Pass auth token for WebSocket authentication
       const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
-      socketRef.current = io(wsUrl, {
-        transports: ['websocket', 'polling'],
-        autoConnect: true,
-        auth: {
-          token: getCookieToken(),
-        },
-      });
 
-      socketRef.current.on('connect', () => {
-        console.log('[Socket] Connected:', socketRef.current?.id);
-      });
+      // Fetch a WS token from the API (needed because the auth cookie is httpOnly)
+      fetch('/api/auth/ws-token')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!data?.token) {
+            console.error('[Socket] Failed to get WS auth token');
+            return;
+          }
 
-      socketRef.current.on('disconnect', () => {
-        console.log('[Socket] Disconnected');
-      });
+          socketRef.current = io(wsUrl, {
+            transports: ['websocket', 'polling'],
+            autoConnect: true,
+            auth: {
+              token: data.token,
+            },
+          });
 
-      socketRef.current.on('connect_error', (err) => {
-        console.error('[Socket] Connection error:', err.message);
-      });
+          socketRef.current.on('connect', () => {
+            console.log('[Socket] Connected:', socketRef.current?.id);
+            // Auto-identify user for room-based delivery
+            if (userId) {
+              socketRef.current?.emit('user:identify', { userId });
+            }
+          });
+
+          socketRef.current.on('disconnect', () => {
+            console.log('[Socket] Disconnected');
+          });
+
+          socketRef.current.on('connect_error', (err) => {
+            console.error('[Socket] Connection error:', err.message);
+          });
+        })
+        .catch((err) => {
+          console.error('[Socket] Token fetch failed:', err.message);
+        });
     }
 
-    // Auto-identify user for room-based delivery
+    // Auto-identify user for room-based delivery (if already connected)
     if (userId && socketRef.current?.connected) {
       socketRef.current.emit('user:identify', { userId });
     }
@@ -73,17 +90,4 @@ export function useSocket(userId?: string) {
   }, []);
 
   return { emit, on, off };
-}
-
-// Helper to get the auth token from cookies for WebSocket auth
-function getCookieToken(): string {
-  if (typeof document === 'undefined') return '';
-  const cookies = document.cookie.split(';');
-  for (const cookie of cookies) {
-    const [name, value] = cookie.trim().split('=');
-    if (name === 'rogan_live_token') {
-      return value;
-    }
-  }
-  return '';
 }

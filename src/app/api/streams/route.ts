@@ -50,9 +50,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    // SECURITY: Only creators can go live
-    if (user.role !== 'creator' && user.role !== 'admin') {
-      return NextResponse.json({ error: 'Only creators can start streams' }, { status: 403 });
+    // Auto-promote user to creator role on first stream
+    // Any authenticated user can go live — they become a creator automatically
+    if (user.role === 'user') {
+      await db.user.update({
+        where: { id: user.id },
+        data: { role: 'creator' },
+      });
     }
 
     const body = await request.json();

@@ -63,6 +63,9 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       const data = await res.json();
       if (res.ok) {
         set((state) => ({ streams: [data.stream, ...state.streams] }));
+        // Refresh auth state since the user may have been auto-promoted to creator
+        const { useAuthStore } = await import('./authStore');
+        useAuthStore.getState().checkAuth();
         return data.stream;
       }
       return null;
