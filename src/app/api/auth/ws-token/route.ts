@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getUserFromRequest, signToken } from '@/lib/auth';
+import { createHash } from 'crypto';
+
+// Diagnostic: compute hash of the secret being used (matches WS server log)
+const EFFECTIVE_SECRET = process.env.JWT_SECRET || 'rogan-live-dev-only-insecure-secret';
+const secretHash = createHash('sha256').update(EFFECTIVE_SECRET).digest('hex').slice(0, 8);
 
 /**
  * GET /api/auth/ws-token
@@ -21,7 +26,11 @@ export async function GET() {
       role: user.role,
     });
 
-    return NextResponse.json({ token: wsToken });
+    // Include secret hash in response for debugging (not the actual secret!)
+    return NextResponse.json({
+      token: wsToken,
+      _debug: { secretHash },
+    });
   } catch {
     return NextResponse.json({ error: 'Failed to generate WS token' }, { status: 500 });
   }

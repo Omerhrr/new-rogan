@@ -3,10 +3,16 @@ import jwt from "jsonwebtoken";
 import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { createHash } from "crypto";
 
 // ── Resolve directory for ESM (Bun --hot) ──────────────────────────
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+let __dirname: string;
+try {
+  const __filename = fileURLToPath(import.meta.url);
+  __dirname = dirname(__filename);
+} catch {
+  __dirname = process.cwd();
+}
 
 // ── Load JWT_SECRET from env, parent .env, or dev fallback ──────────
 function loadEnvFile(filePath: string): Record<string, string> {
@@ -25,13 +31,21 @@ function loadEnvFile(filePath: string): Record<string, string> {
   return env;
 }
 
-// Try local .env first, then parent .env (main app's .env)
+// Search multiple paths for the .env file (Bun --hot, Docker, etc.)
 if (!process.env.JWT_SECRET) {
-  const localEnv = loadEnvFile(resolve(__dirname, ".env"));
-  const parentEnv = loadEnvFile(resolve(__dirname, "../../.env"));
-  const merged = { ...parentEnv, ...localEnv };
-  for (const [key, val] of Object.entries(merged)) {
-    if (!process.env[key]) process.env[key] = val;
+  const searchPaths = [
+    resolve(__dirname, ".env"),                    // local .env
+    resolve(__dirname, "../../.env"),               // parent project .env
+    resolve(process.cwd(), ".env"),                 // current working dir
+    resolve(process.cwd(), "../../.env"),           // cwd parent .env
+  ];
+  for (const envPath of searchPaths) {
+    const loaded = loadEnvFile(envPath);
+    if (loaded.JWT_SECRET) {
+      process.env.JWT_SECRET = loaded.JWT_SECRET;
+      console.log(`[Config] Loaded JWT_SECRET from ${envPath}`);
+      break;
+    }
   }
 }
 
@@ -46,6 +60,10 @@ if (!JWT_SECRET) {
   JWT_SECRET = DEV_JWT_SECRET;
   console.warn("⚠️  WARNING: JWT_SECRET not set. Using development default. Set JWT_SECRET in .env for security.");
 }
+
+// Diagnostic: print hash of secret so you can verify it matches the Next.js app
+const secretHash = createHash("sha256").update(JWT_SECRET).digest("hex").slice(0, 8);
+console.log(`[Config] JWT_SECRET hash: ${secretHash} (must match Next.js app)`);
 
 const ALLOWED_ORIGINS = (process.env.WS_ORIGINS || "http://localhost:3000").split(",");
 

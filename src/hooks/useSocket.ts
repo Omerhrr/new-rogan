@@ -30,6 +30,11 @@ export function useSocket(userId?: string) {
             return;
           }
 
+          // Debug: log secret hash to verify it matches WS server
+          if (data._debug?.secretHash) {
+            console.log('[Socket] Next.js secret hash:', data._debug.secretHash, '(must match WS server)');
+          }
+
           socketRef.current = io(wsUrl, {
             transports: ['websocket', 'polling'],
             autoConnect: true,
