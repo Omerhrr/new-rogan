@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
+import { MediaSoupManager } from "./mediasoup-manager.js";
 
 // ── Resolve directory for ESM (Bun --hot) ──────────────────────────
 let __dirname: string;
@@ -67,6 +68,15 @@ console.log(`[Config] JWT_SECRET hash: ${secretHash} (must match Next.js app)`);
 
 const ALLOWED_ORIGINS = (process.env.WS_ORIGINS || "http://localhost:3000").split(",");
 
+// ── MediaSoup SFU initialisation ──────────────────────────────────────
+const mediaSoupManager = new MediaSoupManager();
+mediaSoupManager.init().then(() => {
+  console.log('[MediaSoup] SFU initialized');
+}).catch((err) => {
+  console.error('[MediaSoup] Failed to initialize:', err.message);
+  console.warn('[MediaSoup] WebRTC streaming will not be available');
+});
+
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
 const io = new Server(PORT, {
@@ -104,6 +114,8 @@ const activeStreams: Record<string, { creatorId: string; creatorName: string; ti
 
 // Track socket -> userId mapping for room-based delivery
 const socketUserMap: Record<string, string> = {};
+// Track socket -> set of (roomId, consumerTransportId) for WebRTC cleanup on disconnect
+const socketWebRtcMap: Record<string, Array<{ roomId: string; consumerTransportId: string }>> = {};
 
 io.on("connection", (socket) => {
   const user = socket.data.user as AuthenticatedSocketData;
@@ -185,6 +197,10 @@ io.on("connection", (socket) => {
     }
     delete activeStreams[data.streamId];
     delete streamViewers[data.streamId];
+    // Clean up MediaSoup room resources
+    mediaSoupManager.closeRoom(data.streamId).catch((err) => {
+      console.error(`[MediaSoup] Failed to close room ${data.streamId}:`, err.message);
+    });
     io.emit("stream:ended", { streamId: data.streamId });
     console.log(`[Stream] Ended: ${data.streamId}`);
   });
@@ -455,11 +471,128 @@ io.on("connection", (socket) => {
     });
   });
 
+  // ── WebRTC Signalling Events ──────────────────────────────────────
+
+  // Get router RTP capabilities
+  socket.on('webrtc:getRouterRtpCapabilities', async (data: { roomId: string }, callback) => {
+    try {
+      const rtpCapabilities = await mediaSoupManager.getRouterRtpCapabilities(data.roomId);
+      callback({ rtpCapabilities });
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Create producer transport (broadcaster)
+  socket.on('webrtc:createProducerTransport', async (data: { roomId: string }, callback) => {
+    try {
+      const transportOptions = await mediaSoupManager.createProducerTransport(data.roomId);
+      callback(transportOptions);
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Create consumer transport (viewer)
+  socket.on('webrtc:createConsumerTransport', async (data: { roomId: string }, callback) => {
+    try {
+      const transportOptions = await mediaSoupManager.createConsumerTransport(data.roomId);
+      // Track consumer transport for cleanup on disconnect
+      if (!socketWebRtcMap[socket.id]) socketWebRtcMap[socket.id] = [];
+      socketWebRtcMap[socket.id].push({ roomId: data.roomId, consumerTransportId: transportOptions.id });
+      callback(transportOptions);
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Connect transport (both producer and consumer)
+  socket.on('webrtc:connectTransport', async (data: { roomId: string; transportId: string; dtlsParameters: any }, callback) => {
+    try {
+      await mediaSoupManager.connectTransport(data.roomId, data.transportId, data.dtlsParameters);
+      callback({});
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Produce media (broadcaster)
+  socket.on('webrtc:produce', async (data: { roomId: string; transportId: string; kind: string; rtpParameters: any }, callback) => {
+    try {
+      const { id } = await mediaSoupManager.createProducer(data.roomId, data.transportId, data.kind, data.rtpParameters);
+      callback({ id });
+      // Notify all viewers in the stream room about the new producer
+      socket.to(`stream:${data.roomId}`).emit('webrtc:newProducer', { producerId: id, kind: data.kind });
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Consume media (viewer)
+  socket.on('webrtc:consume', async (data: { roomId: string; consumerTransportId: string; producerId: string; rtpCapabilities: any }, callback) => {
+    try {
+      const consumer = await mediaSoupManager.createConsumer(data.roomId, data.consumerTransportId, data.producerId, data.rtpCapabilities);
+      callback(consumer);
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Resume consumer
+  socket.on('webrtc:resumeConsumer', async (data: { roomId: string; consumerId: string }, callback) => {
+    try {
+      await mediaSoupManager.resumeConsumer(data.roomId, data.consumerId);
+      callback({});
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Set consumer preferred layers (quality switching)
+  socket.on('webrtc:setPreferredLayers', async (data: { roomId: string; consumerId: string; spatialLayer: number; temporalLayer: number }, callback) => {
+    try {
+      await mediaSoupManager.setConsumerPreferredLayers(data.roomId, data.consumerId, data.spatialLayer, data.temporalLayer);
+      callback({});
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Close producer
+  socket.on('webrtc:closeProducer', async (data: { roomId: string }, callback) => {
+    try {
+      await mediaSoupManager.closeProducer(data.roomId);
+      callback({});
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
+  // Close consumer
+  socket.on('webrtc:closeConsumer', async (data: { roomId: string; consumerId: string }, callback) => {
+    try {
+      await mediaSoupManager.closeConsumer(data.roomId, data.consumerId);
+      callback({});
+    } catch (err) {
+      callback({ error: (err as Error).message });
+    }
+  });
+
   // ---- Disconnect ----
   socket.on("disconnect", () => {
     const userId = socketUserMap[socket.id];
     if (userId) {
       delete socketUserMap[socket.id];
+    }
+    // Clean up WebRTC consumer transports for this socket
+    const webrtcEntries = socketWebRtcMap[socket.id];
+    if (webrtcEntries) {
+      for (const { roomId, consumerTransportId } of webrtcEntries) {
+        mediaSoupManager.closeConsumerTransport(roomId, consumerTransportId).catch((err) => {
+          console.error(`[MediaSoup] Failed to close consumer transport on disconnect:`, err.message);
+        });
+      }
+      delete socketWebRtcMap[socket.id];
     }
     console.log(`[WS] Disconnected: ${socket.id} (User: ${user.userId})`);
   });

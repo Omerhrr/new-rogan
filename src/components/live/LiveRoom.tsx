@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { ArrowLeft, Gift, Users, Share2, Flag } from 'lucide-react';
 import { useStreamStore } from '@/stores/streamStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -11,6 +10,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { ChatPanel } from './ChatPanel';
 import { GiftPicker } from './GiftPicker';
 import { GiftOverlay } from './GiftOverlay';
+import { StreamPlayer } from './StreamPlayer';
 import { LiveBadge } from '@/components/shared/LiveBadge';
 import { ViewerCount } from '@/components/shared/ViewerCount';
 
@@ -20,24 +20,12 @@ interface LiveRoomProps {
   emitSocket: (event: string, data: unknown) => void;
 }
 
-const GRADIENTS = [
-  'from-red-900 via-purple-900 to-black',
-  'from-blue-900 via-indigo-900 to-black',
-  'from-green-900 via-teal-900 to-black',
-  'from-orange-900 via-red-900 to-black',
-  'from-purple-900 via-pink-900 to-black',
-  'from-cyan-900 via-blue-900 to-black',
-  'from-amber-900 via-orange-900 to-black',
-  'from-rose-900 via-red-900 to-black',
-];
-
 export function LiveRoom({ streamId, onBack, emitSocket }: LiveRoomProps) {
   const { streams, viewerCount, setViewerCount } = useStreamStore();
   const { addMessage, addSystemMessage } = useChatStore();
   const { addAnimation, setShowPicker, showPicker } = useGiftStore();
   const { tkBalance, fetchBalance } = useWalletStore();
   const { user } = useAuthStore();
-  const [gradientIdx] = useState(Math.floor(Math.random() * GRADIENTS.length));
 
   const stream = streams.find((s) => s.id === streamId);
 
@@ -151,31 +139,15 @@ export function LiveRoom({ streamId, onBack, emitSocket }: LiveRoomProps) {
     <div className="h-screen bg-[#0A0A0A] flex flex-col md:flex-row relative">
       {/* Stream video area */}
       <div className="relative flex-1 md:flex-[7] bg-black">
-        {/* Gradient background as video placeholder */}
-        <div className={`absolute inset-0 bg-gradient-to-br ${GRADIENTS[gradientIdx]}`}>
-          {/* Animated particles */}
-          <div className="absolute inset-0 overflow-hidden">
-            {[...Array(30)].map((_, i) => (
-              <motion.div
-                key={i}
-                className="absolute w-1 h-1 bg-white/10 rounded-full"
-                style={{
-                  left: `${Math.random() * 100}%`,
-                  top: `${Math.random() * 100}%`,
-                }}
-                animate={{
-                  y: [0, -50, 0],
-                  opacity: [0.1, 0.4, 0.1],
-                }}
-                transition={{
-                  duration: 3 + Math.random() * 4,
-                  repeat: Infinity,
-                  delay: Math.random() * 3,
-                }}
-              />
-            ))}
-          </div>
-        </div>
+        {/* WebRTC Stream Player */}
+        <StreamPlayer
+          streamId={streamId}
+          title={stream.title}
+          creatorName={stream.creator.displayName || stream.creator.username}
+          creatorAvatar={stream.creator.avatar}
+          viewerCount={viewerCount || stream.viewerCount}
+          isLive={stream.isLive}
+        />
 
         {/* Gift overlay */}
         <GiftOverlay />

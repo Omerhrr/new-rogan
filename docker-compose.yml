@@ -26,10 +26,13 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
+      # WebRTC media ports (MediaSoup RTC range)
+      - "10000-10100:10000-10100/udp"
     environment:
       - PORT=3001
       - CORS_ORIGIN=http://localhost:3000
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - ANNOUNCED_IP=${ANNOUNCED_IP:-127.0.0.1}
     restart: unless-stopped
 
 volumes:

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '@/stores/authStore';
+import { setSocketRef, clearSocketRef } from '@/lib/socket-ref';
 
 export function useSocket(userId?: string) {
   const socketRef = useRef<Socket | null>(null);
@@ -43,6 +44,9 @@ export function useSocket(userId?: string) {
             },
           });
 
+          // Store socket ref for ack-based signaling (mediasoup)
+          setSocketRef(socketRef.current);
+
           socketRef.current.on('connect', () => {
             console.log('[Socket] Connected:', socketRef.current?.id);
             // Auto-identify user for room-based delivery
@@ -71,6 +75,7 @@ export function useSocket(userId?: string) {
 
     return () => {
       if (socketRef.current) {
+        clearSocketRef();
         socketRef.current.disconnect();
         socketRef.current = null;
       }
