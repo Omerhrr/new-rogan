@@ -1,7 +1,12 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+// ── Resolve directory for ESM (Bun --hot) ──────────────────────────
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ── Load JWT_SECRET from env, parent .env, or dev fallback ──────────
 function loadEnvFile(filePath: string): Record<string, string> {
@@ -20,7 +25,7 @@ function loadEnvFile(filePath: string): Record<string, string> {
   return env;
 }
 
-// Try local .env first, then parent .env
+// Try local .env first, then parent .env (main app's .env)
 if (!process.env.JWT_SECRET) {
   const localEnv = loadEnvFile(resolve(__dirname, ".env"));
   const parentEnv = loadEnvFile(resolve(__dirname, "../../.env"));
@@ -30,14 +35,15 @@ if (!process.env.JWT_SECRET) {
   }
 }
 
+// IMPORTANT: This fallback MUST match the one in src/lib/auth.ts exactly
+const DEV_JWT_SECRET = "rogan-live-dev-only-insecure-secret";
 let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   if (process.env.NODE_ENV === "production") {
     console.error("FATAL: JWT_SECRET environment variable is not set. WebSocket server refusing to start.");
     process.exit(1);
   }
-  // Dev fallback: use a default secret with a loud warning
-  JWT_SECRET = "rogan-live-dev-secret-change-in-production";
+  JWT_SECRET = DEV_JWT_SECRET;
   console.warn("⚠️  WARNING: JWT_SECRET not set. Using development default. Set JWT_SECRET in .env for security.");
 }
 
