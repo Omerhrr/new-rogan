@@ -22,8 +22,6 @@ export function handleApiError(error: unknown): NextResponse {
         return NextResponse.json({ error: 'You do not have permission to do this' }, { status: 403 });
       case 'NOT_FOUND':
         return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
-      case 'VALIDATION_ERROR':
-        return NextResponse.json({ error: error.message }, { status: 400 });
       case 'RATE_LIMITED':
         return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 });
     }

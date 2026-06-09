@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromRequest, sanitizeString } from '@/lib/auth';
+import { parsePagination, paginateResults } from '@/lib/pagination';
 import { v4 as uuidv4 } from 'uuid';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { limit, cursor } = parsePagination(request);
+
     const streams = await db.stream.findMany({
       where: { isLive: true, isPrivate: false },
       select: {
@@ -25,9 +28,15 @@ export async function GET() {
         },
       },
       orderBy: { viewerCount: 'desc' },
+      take: limit + 1,
+      ...(cursor
+        ? { skip: 1, cursor: { id: cursor } }
+        : {}),
     });
 
-    return NextResponse.json({ streams });
+    const paginated = paginateResults(streams, limit);
+
+    return NextResponse.json({ streams: paginated.data, pagination: paginated.pagination });
   } catch (error) {
     console.error('Get streams error:', error);
     return NextResponse.json({ error: 'Failed to get streams' }, { status: 500 });

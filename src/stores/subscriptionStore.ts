@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-interface SubscriptionTier {
+export interface SubscriptionTier {
   id: string;
   creatorId: string;
   name: string;

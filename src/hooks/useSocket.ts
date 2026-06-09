@@ -4,7 +4,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '@/stores/authStore';
 
-export function useSocket() {
+export function useSocket(userId?: string) {
   const socketRef = useRef<Socket | null>(null);
   const { user } = useAuthStore();
 
@@ -41,13 +41,18 @@ export function useSocket() {
       });
     }
 
+    // Auto-identify user for room-based delivery
+    if (userId && socketRef.current?.connected) {
+      socketRef.current.emit('user:identify', { userId });
+    }
+
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
     };
-  }, [user]);
+  }, [user, userId]);
 
   const emit = useCallback((event: string, data: unknown) => {
     if (socketRef.current?.connected) {

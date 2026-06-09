@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest, sanitizeString } from '@/lib/auth';
+import { getUserFromRequest, sanitizeString, rateLimit } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
     const user = await getUserFromRequest();
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    // Rate limit: 10/min per user
+    if (!rateLimit(`dm:request:${user.id}`, 10, 60 * 1000)) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
     }
 
     const body = await request.json();

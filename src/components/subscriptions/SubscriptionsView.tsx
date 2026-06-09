@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Crown, Sparkles, Star, Users, Loader2, Plus, Trash2, Search } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
-import { useSubscriptionStore } from '@/stores/subscriptionStore';
+import { useSubscriptionStore, type SubscriptionTier } from '@/stores/subscriptionStore';
 import { CreateTierModal } from './CreateTierModal';
 
 type SubTab = 'subscribe' | 'mySubs' | 'myTiers';

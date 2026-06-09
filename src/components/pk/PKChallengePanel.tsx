@@ -29,7 +29,7 @@ const DURATION_OPTIONS = [
 export function PKChallengePanel({ streamId, onClose }: PKChallengePanelProps) {
   const { user } = useAuthStore();
   const { challenge, accept, isLoading } = usePKStore();
-  const { emit, on, off } = useSocket();
+  const { emit, on, off } = useSocket(user?.id);
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [liveCreators, setLiveCreators] = useState<LiveCreator[]>([]);

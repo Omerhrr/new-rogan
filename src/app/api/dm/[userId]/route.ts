@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest, sanitizeString } from '@/lib/auth';
+import { getUserFromRequest, sanitizeString, rateLimit } from '@/lib/auth';
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
   try {
@@ -49,6 +49,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const user = await getUserFromRequest();
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    // Rate limit: 30/min per user
+    if (!rateLimit(`dm:send:${user.id}`, 30, 60 * 1000)) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
     }
 
     const { userId: receiverId } = await params;

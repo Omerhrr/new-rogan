@@ -26,7 +26,11 @@ export async function GET() {
       ...receivedMessages.map((m) => m.senderId),
     ]);
 
-    const conversations = [];
+    const conversations: Array<{
+      user: { id: string; username: string; displayName: string | null; avatar: string | null };
+      lastMessage: { id: string; message: string; price: number; createdAt: Date; senderId: string; receiverId: string; isPaid: boolean; isRead: boolean };
+      unreadCount: number;
+    }> = [];
 
     for (const otherUserId of userIds) {
       const otherUser = await db.user.findUnique({

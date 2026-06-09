@@ -42,12 +42,25 @@ io.use((socket, next) => {
 const streamViewers: Record<string, Set<string>> = {};
 const activeStreams: Record<string, { creatorId: string; creatorName: string; title: string; viewerCount: number; thumbnailUrl?: string }> = {};
 
+// Track socket -> userId mapping for room-based delivery
+const socketUserMap: Record<string, string> = {};
+
 io.on("connection", (socket) => {
   const user = socket.data.user as AuthenticatedSocketData;
   console.log(`[WS] Connected: ${socket.id} (User: ${user.userId})`);
 
   // SECURITY: Auto-join user to their own room for targeted DMs and notifications
   socket.join(`user:${user.userId}`);
+
+  // ---- User Identification ----
+  // Clients must send this event after connecting to be auto-joined to their user room
+  socket.on("user:identify", (data: { userId: string }) => {
+    const { userId } = data;
+    if (!userId) return;
+    socketUserMap[socket.id] = userId;
+    socket.join(`user:${userId}`);
+    console.log(`[WS] User ${userId} identified on socket ${socket.id}, joined room user:${userId}`);
+  });
 
   // ---- Stream Events ----
   socket.on("stream:start", (data: { streamId: string; creatorId: string; creatorName: string; title: string }) => {
@@ -187,7 +200,7 @@ io.on("connection", (socket) => {
     };
     // Broadcast gift to stream room
     io.to(`stream:${data.streamId}`).emit("gift:received", giftEvent);
-    // Send notification to creator via their personal room
+    // Send notification to creator via user room
     io.to(`user:${data.receiverId}`).emit("notification", {
       userId: data.receiverId,
       type: "gift_received",
@@ -216,7 +229,7 @@ io.on("connection", (socket) => {
       id: `dm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       timestamp: Date.now(),
     };
-    // Notify receiver via their personal room (O(1) instead of O(n) broadcast)
+    // Notify receiver via user room
     io.to(`user:${data.receiverId}`).emit("dm:received", dmEvent);
     // Confirm to sender
     socket.emit("dm:sent", dmEvent);
@@ -279,7 +292,7 @@ io.on("connection", (socket) => {
       creator1Score: 0,
       creator2Score: 0,
     };
-    // Notify both creators via their personal rooms
+    // Notify both creators via user rooms
     io.to(`user:${data.creator1Id}`).emit("pk:started", { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator2Id });
     io.to(`user:${data.creator2Id}`).emit("pk:started", { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator1Id });
     // Broadcast to stream viewers
@@ -384,6 +397,10 @@ io.on("connection", (socket) => {
 
   // ---- Disconnect ----
   socket.on("disconnect", () => {
+    const userId = socketUserMap[socket.id];
+    if (userId) {
+      delete socketUserMap[socket.id];
+    }
     console.log(`[WS] Disconnected: ${socket.id} (User: ${user.userId})`);
   });
 });

@@ -30,7 +30,7 @@ function TypingDots() {
 export function DMView() {
   const { conversations, activeConversation, messages, fetchConversations, openConversation, sendMessage, closeConversation } = useDMStore();
   const { user } = useAuthStore();
-  const { emit, on, off } = useSocket();
+  const { emit, on, off } = useSocket(user?.id);
   const [input, setInput] = useState('');
   const [isPaid, setIsPaid] = useState(false);
   const [price, setPrice] = useState('5');
@@ -258,7 +258,7 @@ export function DMView() {
                       {conv.user.displayName?.[0] || conv.user.username[0]}
                     </div>
                     {/* Online status indicator - shown if the user has isLive property (creators streaming) */}
-                    {'isLive' in conv.user && (conv.user as Record<string, unknown>).isLive && (
+                    {'isLive' in conv.user && Boolean((conv.user as Record<string, unknown>).isLive) && (
                       <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-[#1A1A1A]" />
                     )}
                     {conv.unreadCount > 0 && (

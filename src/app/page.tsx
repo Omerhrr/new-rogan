@@ -21,6 +21,7 @@ import { PKBattleArena } from '@/components/pk/PKBattleArena';
 import { SubscriptionsView } from '@/components/subscriptions/SubscriptionsView';
 import { BottomNav, type ViewType } from '@/components/shared/BottomNav';
 import { Sidebar } from '@/components/shared/Sidebar';
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 
 export default function HomePage() {
   const { user, isAuthenticated, isLoading: authLoading, checkAuth } = useAuthStore();
@@ -28,7 +29,7 @@ export default function HomePage() {
   const { addMessage } = useChatStore();
   const { fetchConversations } = useDMStore();
   const { fetchNotifications } = useNotificationStore();
-  const { emit, on, off } = useSocket();
+  const { emit, on, off } = useSocket(user?.id);
 
   const [activeView, setActiveView] = useState<ViewType>('feed');
   const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
@@ -172,6 +173,7 @@ export default function HomePage() {
 
       {/* Main content */}
       <main className="flex-1 min-h-screen relative">
+        <ErrorBoundary>
         <AnimatePresence mode="wait">
           <motion.div
             key={activeView}
@@ -183,6 +185,7 @@ export default function HomePage() {
             {renderView()}
           </motion.div>
         </AnimatePresence>
+        </ErrorBoundary>
       </main>
 
       {/* Mobile Bottom Nav */}

@@ -18,8 +18,8 @@ export async function POST(request: NextRequest) {
     }
 
     // SECURITY: Rate limit gift sending
-    if (!rateLimit(`gift:${user.id}`, 30, 60_000)) {
-      return NextResponse.json({ error: 'Slow down! Too many gifts.' }, { status: 429 });
+    if (!rateLimit(`gifts:send:${user.id}`, 30, 60 * 1000)) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
     }
 
     const body = await request.json();

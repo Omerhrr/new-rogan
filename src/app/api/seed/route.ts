@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     const passwordHash = await hashPassword('password123');
 
     // Create creator users
-    const creators = [];
+    const creators: Array<{ id: string; username: string; email: string; role: string; passwordHash: string | null; googleId: string | null; displayName: string | null; avatar: string | null; bio: string | null; isLive: boolean; createdAt: Date; updatedAt: Date }> = [];
     const creatorData = [
       { username: 'crypto_rogan', email: 'rogan@example.com', displayName: 'Crypto Rogan', bio: 'The original Rogan Live creator', avatar: null, role: 'creator' },
       { username: 'luna_dance', email: 'luna@example.com', displayName: 'Luna Dance', bio: 'Professional dancer & entertainer', avatar: null, role: 'creator' },
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
     await db.ledgerAccount.create({ data: { userId: adminUser.id, tkBalance: 99999900 } });
 
     // Create regular users
-    const regularUsers = [];
+    const regularUsers: Array<{ id: string; username: string; email: string; role: string; passwordHash: string | null; googleId: string | null; displayName: string | null; avatar: string | null; bio: string | null; isLive: boolean; createdAt: Date; updatedAt: Date }> = [];
     for (let i = 1; i <= 10; i++) {
       const user = await db.user.create({
         data: {
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Create streams for creators
-    const streams = [];
+    const streams: Array<{ id: string; creatorId: string; title: string; description: string | null; streamKey: string; isLive: boolean; isPrivate: boolean; thumbnailUrl: string | null; viewerCount: number; peakViewers: number; startedAt: Date | null; endedAt: Date | null; createdAt: Date }> = [];
     const streamData = [
       { creatorIdx: 0, title: 'Late Night Crypto Talk', viewerCount: 1247, isPrivate: false },
       { creatorIdx: 1, title: 'Dance Party Friday!', viewerCount: 892, isPrivate: false },
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Create private streams
-    const privateStreams = [];
+    const privateStreams: Array<{ id: string; creatorId: string; title: string; description: string | null; streamKey: string; isLive: boolean; isPrivate: boolean; thumbnailUrl: string | null; viewerCount: number; peakViewers: number; startedAt: Date | null; endedAt: Date | null; createdAt: Date }> = [];
     const privateStreamData = [
       { creatorIdx: 0, title: 'VIP Crypto Analysis', viewerCount: 15 },
       { creatorIdx: 1, title: 'Private Dance Lesson', viewerCount: 3 },

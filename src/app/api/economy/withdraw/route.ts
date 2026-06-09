@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     }
 
     // SECURITY: Rate limit withdrawal attempts
-    if (!rateLimit(`withdraw:${user.id}`, 3, 60_000)) {
+    if (!rateLimit(`withdraw:${user.id}`, 3, 60 * 1000)) {
       return NextResponse.json({ error: 'Too many withdrawal attempts. Please wait.' }, { status: 429 });
     }
 

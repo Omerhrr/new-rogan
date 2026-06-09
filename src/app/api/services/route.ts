@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromRequest, sanitizeString } from '@/lib/auth';
+import { parsePagination, paginateResults } from '@/lib/pagination';
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,6 +10,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
+    const { limit, cursor } = parsePagination(request);
     const { searchParams } = new URL(request.url);
     const category = searchParams.get('category');
 
@@ -29,10 +31,15 @@ export async function GET(request: NextRequest) {
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: 50, // SECURITY: Limit results
+      take: limit + 1,
+      ...(cursor
+        ? { skip: 1, cursor: { id: cursor } }
+        : {}),
     });
 
-    return NextResponse.json({ services });
+    const paginated = paginateResults(services, limit);
+
+    return NextResponse.json({ services: paginated.data, pagination: paginated.pagination });
   } catch (error) {
     console.error('Get services error:', error);
     return NextResponse.json({ error: 'Failed to get services' }, { status: 500 });

@@ -24,7 +24,7 @@ const DURATION_OPTIONS = [
 export function PKBattleArena() {
   const { user } = useAuthStore();
   const { activeBattles, activeBattle, battleScores, timeRemaining, fetchActiveBattles, setActiveBattle, setScores, setTimeRemaining, endBattle, challenge, accept, isLoading } = usePKStore();
-  const { emit, on, off } = useSocket();
+  const { emit, on, off } = useSocket(user?.id);
 
   const [showWinner, setShowWinner] = useState(false);
   const [winnerName, setWinnerName] = useState('');

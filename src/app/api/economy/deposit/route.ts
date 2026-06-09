@@ -15,8 +15,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Deposits require admin authorization. Use the payment gateway.' }, { status: 403 });
     }
 
-    // SECURITY: Rate limit deposit attempts
-    if (!rateLimit(`deposit:${user.id}`, 5, 60_000)) {
+    // Rate limit: 5/min per user
+    if (!rateLimit(`deposit:${user.id}`, 5, 60 * 1000)) {
       return NextResponse.json({ error: 'Too many deposit attempts. Please wait.' }, { status: 429 });
     }
 

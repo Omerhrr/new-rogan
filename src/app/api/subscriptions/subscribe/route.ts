@@ -1,12 +1,12 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromRequest, rateLimit } from '@/lib/auth';
 
 // POST - Subscribe to a creator's tier
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const user = await getUserFromRequest();
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
 
     // SECURITY: Rate limit subscription attempts
     if (!rateLimit(`subscribe:${user.id}`, 5, 60_000)) {
@@ -30,7 +30,6 @@ export async function POST(request: Request) {
     }
 
     // SECURITY: Move ALL checks and operations into a single transaction to prevent TOCTOU race condition.
-    // Previously, balance was checked OUTSIDE the transaction, creating a window for double-spend.
     const result = await db.$transaction(async (tx) => {
       // Find the tier
       const subscriptionTier = await tx.subscriptionTier.findFirst({
