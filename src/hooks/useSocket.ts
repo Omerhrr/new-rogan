@@ -20,7 +20,8 @@ export function useSocket(userId?: string) {
 
     if (!socketRef.current) {
       // SECURITY: Pass auth token for WebSocket authentication
-      socketRef.current = io('/?XTransformPort=3003', {
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
+      socketRef.current = io(wsUrl, {
         transports: ['websocket', 'polling'],
         autoConnect: true,
         auth: {

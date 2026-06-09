@@ -1,10 +1,44 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
+import { readFileSync, existsSync } from "fs";
+import { resolve } from "path";
 
-const JWT_SECRET = process.env.JWT_SECRET;
+// ── Load JWT_SECRET from env, parent .env, or dev fallback ──────────
+function loadEnvFile(filePath: string): Record<string, string> {
+  if (!existsSync(filePath)) return {};
+  const content = readFileSync(filePath, "utf-8");
+  const env: Record<string, string> = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim();
+    env[key] = val;
+  }
+  return env;
+}
+
+// Try local .env first, then parent .env
+if (!process.env.JWT_SECRET) {
+  const localEnv = loadEnvFile(resolve(__dirname, ".env"));
+  const parentEnv = loadEnvFile(resolve(__dirname, "../../.env"));
+  const merged = { ...parentEnv, ...localEnv };
+  for (const [key, val] of Object.entries(merged)) {
+    if (!process.env[key]) process.env[key] = val;
+  }
+}
+
+let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  console.error("FATAL: JWT_SECRET environment variable is not set. WebSocket server refusing to start.");
-  process.exit(1);
+  if (process.env.NODE_ENV === "production") {
+    console.error("FATAL: JWT_SECRET environment variable is not set. WebSocket server refusing to start.");
+    process.exit(1);
+  }
+  // Dev fallback: use a default secret with a loud warning
+  JWT_SECRET = "rogan-live-dev-secret-change-in-production";
+  console.warn("⚠️  WARNING: JWT_SECRET not set. Using development default. Set JWT_SECRET in .env for security.");
 }
 
 const ALLOWED_ORIGINS = (process.env.WS_ORIGINS || "http://localhost:3000").split(",");
