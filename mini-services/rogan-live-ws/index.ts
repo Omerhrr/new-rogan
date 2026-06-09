@@ -4,7 +4,6 @@ import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
-import { MediaSoupManager } from "./mediasoup-manager.js";
 
 // ── Resolve directory for ESM (Bun --hot) ──────────────────────────
 let __dirname: string;
@@ -26,7 +25,14 @@ function loadEnvFile(filePath: string): Record<string, string> {
     const eqIdx = trimmed.indexOf("=");
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx).trim();
-    const val = trimmed.slice(eqIdx + 1).trim();
+    let val = trimmed.slice(eqIdx + 1).trim();
+    // Strip surrounding quotes (single or double) — matches Next.js dotenv behavior
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
     env[key] = val;
   }
   return env;
@@ -35,10 +41,10 @@ function loadEnvFile(filePath: string): Record<string, string> {
 // Search multiple paths for the .env file (Bun --hot, Docker, etc.)
 if (!process.env.JWT_SECRET) {
   const searchPaths = [
-    resolve(__dirname, ".env"),                    // local .env
-    resolve(__dirname, "../../.env"),               // parent project .env
-    resolve(process.cwd(), ".env"),                 // current working dir
-    resolve(process.cwd(), "../../.env"),           // cwd parent .env
+    resolve(__dirname, ".env"),
+    resolve(__dirname, "../../.env"),
+    resolve(process.cwd(), ".env"),
+    resolve(process.cwd(), "../../.env"),
   ];
   for (const envPath of searchPaths) {
     const loaded = loadEnvFile(envPath);
@@ -68,16 +74,7 @@ console.log(`[Config] JWT_SECRET hash: ${secretHash} (must match Next.js app)`);
 
 const ALLOWED_ORIGINS = (process.env.WS_ORIGINS || "http://localhost:3000").split(",");
 
-// ── MediaSoup SFU initialisation ──────────────────────────────────────
-const mediaSoupManager = new MediaSoupManager();
-mediaSoupManager.init().then(() => {
-  console.log('[MediaSoup] SFU initialized');
-}).catch((err) => {
-  console.error('[MediaSoup] Failed to initialize:', err.message);
-  console.warn('[MediaSoup] WebRTC streaming will not be available');
-});
-
-const PORT = parseInt(process.env.PORT || '3001', 10);
+const PORT = parseInt(process.env.PORT || "3001", 10);
 
 const io = new Server(PORT, {
   cors: {
@@ -100,22 +97,41 @@ io.use((socket, next) => {
     return next(new Error("Authentication required"));
   }
   try {
-    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] }) as AuthenticatedSocketData;
+    const payload = jwt.verify(token, JWT_SECRET!, { algorithms: ["HS256"] }) as AuthenticatedSocketData;
     socket.data.user = payload;
     next();
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Invalid or expired token";
+    console.error(`[Auth] Token verification failed for socket ${socket.id}: ${msg}`);
     next(new Error("Invalid or expired token"));
   }
 });
 
-// In-memory state for the MVP
+// ── In-memory state ──────────────────────────────────────────────
 const streamViewers: Record<string, Set<string>> = {};
 const activeStreams: Record<string, { creatorId: string; creatorName: string; title: string; viewerCount: number; thumbnailUrl?: string }> = {};
 
 // Track socket -> userId mapping for room-based delivery
 const socketUserMap: Record<string, string> = {};
-// Track socket -> set of (roomId, consumerTransportId) for WebRTC cleanup on disconnect
-const socketWebRtcMap: Record<string, Array<{ roomId: string; consumerTransportId: string }>> = {};
+
+// ── WebRTC Relay State ──────────────────────────────────────────
+// Maps roomId -> broadcaster socket ID
+const roomBroadcasters: Record<string, string> = {};
+// Maps socket ID -> roomId (for both broadcaster and viewer cleanup)
+const socketRoomMap: Record<string, string> = {};
+// Maps roomId -> Set of viewer socket IDs
+const roomViewerSockets: Record<string, Set<string>> = {};
+
+// ── PK Battle State ─────────────────────────────────────────────
+const activePKBattles: Record<string, { creator1Id: string; creator2Id: string; creator1Score: number; creator2Score: number; timerInterval?: ReturnType<typeof setInterval> }> = {};
+
+// ── STUN/TURN Configuration ─────────────────────────────────────
+const ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  // Add TURN servers for production NAT traversal:
+  // { urls: "turn:your-turn-server:3478", username: "username", credential: "password" },
+];
 
 io.on("connection", (socket) => {
   const user = socket.data.user as AuthenticatedSocketData;
@@ -125,7 +141,6 @@ io.on("connection", (socket) => {
   socket.join(`user:${user.userId}`);
 
   // ---- User Identification ----
-  // Clients must send this event after connecting to be auto-joined to their user room
   socket.on("user:identify", (data: { userId: string }) => {
     const { userId } = data;
     if (!userId) return;
@@ -171,7 +186,7 @@ io.on("connection", (socket) => {
   socket.on("stream:leave", (data: { streamId: string; userId: string }) => {
     // SECURITY: Only allow leaving as yourself
     if (data.userId !== user.userId && user.role !== "admin") {
-      return; // Silently ignore invalid leave
+      return;
     }
     const { streamId, userId } = data;
     socket.leave(`stream:${streamId}`);
@@ -197,10 +212,24 @@ io.on("connection", (socket) => {
     }
     delete activeStreams[data.streamId];
     delete streamViewers[data.streamId];
-    // Clean up MediaSoup room resources
-    mediaSoupManager.closeRoom(data.streamId).catch((err) => {
-      console.error(`[MediaSoup] Failed to close room ${data.streamId}:`, err.message);
-    });
+
+    // Clean up WebRTC state for this room
+    const broadcasterSocketId = roomBroadcasters[data.streamId];
+    if (broadcasterSocketId) {
+      // Notify all viewers that the broadcaster left
+      io.to(`stream:${data.streamId}`).emit("webrtc:broadcaster-left", { roomId: data.streamId });
+      // Clean up viewer tracking
+      const viewers = roomViewerSockets[data.streamId];
+      if (viewers) {
+        for (const viewerSid of viewers) {
+          delete socketRoomMap[viewerSid];
+        }
+        delete roomViewerSockets[data.streamId];
+      }
+      delete socketRoomMap[broadcasterSocketId];
+      delete roomBroadcasters[data.streamId];
+    }
+
     io.emit("stream:ended", { streamId: data.streamId });
     console.log(`[Stream] Ended: ${data.streamId}`);
   });
@@ -274,9 +303,7 @@ io.on("connection", (socket) => {
       id: `gift_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       timestamp: Date.now(),
     };
-    // Broadcast gift to stream room
     io.to(`stream:${data.streamId}`).emit("gift:received", giftEvent);
-    // Send notification to creator via user room
     io.to(`user:${data.receiverId}`).emit("notification", {
       userId: data.receiverId,
       type: "gift_received",
@@ -289,12 +316,10 @@ io.on("connection", (socket) => {
 
   // ---- DM Events ----
   socket.on("dm:send", (data: { senderId: string; receiverId: string; message: string }) => {
-    // SECURITY: Only allow sending DMs as yourself
     if (data.senderId !== user.userId) {
       socket.emit("error", { message: "Cannot send DMs as another user" });
       return;
     }
-    // SECURITY: Sanitize and limit message length
     const sanitizedMessage = data.message.replace(/<[^>]*>/g, "").trim().slice(0, 1000);
     if (!sanitizedMessage) return;
 
@@ -305,41 +330,30 @@ io.on("connection", (socket) => {
       id: `dm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       timestamp: Date.now(),
     };
-    // Notify receiver via user room
     io.to(`user:${data.receiverId}`).emit("dm:received", dmEvent);
-    // Confirm to sender
     socket.emit("dm:sent", dmEvent);
   });
 
   socket.on("dm:typing", (data: { senderId: string; receiverId: string }) => {
-    // SECURITY: Only allow as yourself
     if (data.senderId !== user.userId) return;
     io.to(`user:${data.receiverId}`).emit("dm:typing", { senderId: data.senderId });
   });
 
   socket.on("dm:read", (data: { senderId: string; receiverId: string }) => {
-    // SECURITY: Only the receiver can mark as read
     if (data.receiverId !== user.userId) return;
     io.to(`user:${data.senderId}`).emit("dm:read", { readBy: data.receiverId });
   });
 
   // ---- Notification Events ----
   socket.on("notification:subscribe", (data: { userId: string }) => {
-    // SECURITY: Only subscribe to your own notifications
-    // Note: Users are already auto-joined to `user:${userId}` on connection
-    // This handler is kept for backwards compatibility
     if (data.userId !== user.userId && user.role !== "admin") {
       socket.emit("error", { message: "Cannot subscribe to another user's notifications" });
       return;
     }
-    // Already in user:${userId} room from connection
   });
 
   // ---- PK Battle Events ----
-  const activePKBattles: Record<string, { creator1Id: string; creator2Id: string; creator1Score: number; creator2Score: number; timerInterval?: ReturnType<typeof setInterval> }> = {};
-
   socket.on("pk:challenge", (data: { fromCreatorId: string; toCreatorId: string; streamId: string; fromCreatorName: string }) => {
-    // SECURITY: Only challenge as yourself
     if (data.fromCreatorId !== user.userId && user.role !== "admin") {
       socket.emit("error", { message: "Cannot issue challenge as another creator" });
       return;
@@ -348,7 +362,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("pk:update", (data: { streamId: string; creator1Score: number; creator2Score: number }) => {
-    // SECURITY: Only stream creator or admin can broadcast PK updates
     const stream = activeStreams[data.streamId];
     if (!stream || (stream.creatorId !== user.userId && user.role !== "admin")) {
       return;
@@ -357,7 +370,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("pk:start", (data: { battleId: string; streamId: string; creator1Id: string; creator2Id: string; duration: number }) => {
-    // SECURITY: Only one of the participants can start the battle
     if (data.creator1Id !== user.userId && data.creator2Id !== user.userId && user.role !== "admin") {
       socket.emit("error", { message: "Only participants can start a PK battle" });
       return;
@@ -368,10 +380,8 @@ io.on("connection", (socket) => {
       creator1Score: 0,
       creator2Score: 0,
     };
-    // Notify both creators via user rooms
     io.to(`user:${data.creator1Id}`).emit("pk:started", { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator2Id });
     io.to(`user:${data.creator2Id}`).emit("pk:started", { battleId: data.battleId, streamId: data.streamId, opponentId: data.creator1Id });
-    // Broadcast to stream viewers
     io.to(`stream:${data.streamId}`).emit("pk:started", { battleId: data.battleId, creator1Id: data.creator1Id, creator2Id: data.creator2Id, duration: data.duration });
     console.log(`[PK] Battle started: ${data.creator1Id} vs ${data.creator2Id}`);
   });
@@ -379,7 +389,6 @@ io.on("connection", (socket) => {
   socket.on("pk:giftScore", (data: { battleId: string; streamId: string; receiverCreatorId: string; amount: number }) => {
     const battle = activePKBattles[data.battleId];
     if (!battle) return;
-    // SECURITY: Validate amount is positive and reasonable
     if (!data.amount || data.amount <= 0 || data.amount > 10000000) return;
     if (data.receiverCreatorId === battle.creator1Id) {
       battle.creator1Score += data.amount;
@@ -396,7 +405,6 @@ io.on("connection", (socket) => {
   socket.on("pk:end", (data: { battleId: string; streamId: string; winnerId: string | null }) => {
     const battle = activePKBattles[data.battleId];
     if (!battle) return;
-    // SECURITY: Only participants can end the battle
     if (battle.creator1Id !== user.userId && battle.creator2Id !== user.userId && user.role !== "admin") {
       socket.emit("error", { message: "Only participants can end a PK battle" });
       return;
@@ -412,14 +420,12 @@ io.on("connection", (socket) => {
   });
 
   socket.on("pk:timer", (data: { battleId: string; streamId: string; timeRemaining: number }) => {
-    // SECURITY: Validate timeRemaining is reasonable
     if (data.timeRemaining < 0 || data.timeRemaining > 3600) return;
     io.to(`stream:${data.streamId}`).emit("pk:timer", { battleId: data.battleId, timeRemaining: data.timeRemaining });
   });
 
   // ---- Private Stream Access Events ----
   socket.on("stream:accessRequest", (data: { streamId: string; userId: string; username: string; creatorId: string }) => {
-    // SECURITY: Only request access as yourself
     if (data.userId !== user.userId) {
       socket.emit("error", { message: "Cannot request access as another user" });
       return;
@@ -427,9 +433,8 @@ io.on("connection", (socket) => {
     io.to(`user:${data.creatorId}`).emit("stream:accessRequest", data);
   });
 
-  // ---- DM Request Events (for non-followers) ----
+  // ---- DM Request Events ----
   socket.on("dm:request", (data: { senderId: string; senderName: string; receiverId: string; message: string }) => {
-    // SECURITY: Only send DM requests as yourself
     if (data.senderId !== user.userId) {
       socket.emit("error", { message: "Cannot send DM requests as another user" });
       return;
@@ -440,7 +445,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("dm:requestResponse", (data: { requestId: string; receiverId: string; senderId: string; accepted: boolean }) => {
-    // SECURITY: Only the receiver can respond to DM requests
     if (data.receiverId !== user.userId) {
       socket.emit("error", { message: "Cannot respond to DM requests for another user" });
       return;
@@ -450,7 +454,6 @@ io.on("connection", (socket) => {
 
   // ---- Task/Service Status Update Events ----
   socket.on("task:update", (data: { requestId: string; status: string; buyerId: string; creatorId: string }) => {
-    // SECURITY: Only buyer or creator can send task updates
     if (data.buyerId !== user.userId && data.creatorId !== user.userId && user.role !== "admin") {
       socket.emit("error", { message: "Not authorized to update this task" });
       return;
@@ -461,7 +464,6 @@ io.on("connection", (socket) => {
 
   // ---- Private Stream Started Notification ----
   socket.on("stream:privateStart", (data: { streamId: string; creatorId: string; creatorName: string; title: string; allowedUsers: string[] }) => {
-    // SECURITY: Only the creator can start private streams
     if (data.creatorId !== user.userId && user.role !== "admin") {
       socket.emit("error", { message: "Not authorized to start private stream" });
       return;
@@ -471,111 +473,163 @@ io.on("connection", (socket) => {
     });
   });
 
-  // ── WebRTC Signalling Events ──────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════
+  // WebRTC Signaling Relay Events (Production-Grade Mesh P2P)
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // Architecture: Socket.IO relays SDP offers/answers and ICE candidates
+  // between broadcasters and viewers. Each viewer gets a direct P2P
+  // PeerConnection to the broadcaster (mesh topology).
+  //
+  // For scaling beyond ~15 viewers per stream, deploy a MediaSoup/LiveKit
+  // SFU on a proper Linux server and swap the signaling handlers below.
+  // ══════════════════════════════════════════════════════════════════
 
-  // Get router RTP capabilities
-  socket.on('webrtc:getRouterRtpCapabilities', async (data: { roomId: string }, callback) => {
-    try {
-      const rtpCapabilities = await mediaSoupManager.getRouterRtpCapabilities(data.roomId);
-      callback({ rtpCapabilities });
-    } catch (err) {
-      callback({ error: (err as Error).message });
+  // Broadcaster signals they are ready to accept viewer connections
+  socket.on("webrtc:broadcaster-ready", (data: { roomId: string }) => {
+    const { roomId } = data;
+
+    // Only one broadcaster per room
+    const existingBroadcaster = roomBroadcasters[roomId];
+    if (existingBroadcaster && existingBroadcaster !== socket.id) {
+      // Check if the old broadcaster is still connected
+      const oldSocket = io.sockets.sockets.get(existingBroadcaster);
+      if (oldSocket) {
+        socket.emit("webrtc:error", { message: "Room already has an active broadcaster" });
+        return;
+      }
     }
+
+    roomBroadcasters[roomId] = socket.id;
+    socketRoomMap[socket.id] = roomId;
+    if (!roomViewerSockets[roomId]) roomViewerSockets[roomId] = new Set();
+
+    console.log(`[WebRTC] Broadcaster ready in room ${roomId} (socket: ${socket.id})`);
+
+    // Send ICE server configuration to the broadcaster
+    socket.emit("webrtc:ice-servers", { iceServers: ICE_SERVERS });
   });
 
-  // Create producer transport (broadcaster)
-  socket.on('webrtc:createProducerTransport', async (data: { roomId: string }, callback) => {
-    try {
-      const transportOptions = await mediaSoupManager.createProducerTransport(data.roomId);
-      callback(transportOptions);
-    } catch (err) {
-      callback({ error: (err as Error).message });
+  // Viewer requests to join a room and receive the broadcaster's stream
+  socket.on("webrtc:viewer-join", (data: { roomId: string }) => {
+    const { roomId } = data;
+    const broadcasterSocketId = roomBroadcasters[roomId];
+
+    if (!broadcasterSocketId) {
+      socket.emit("webrtc:error", { message: "No broadcaster in this room yet" });
+      return;
     }
+
+    // Track this viewer
+    if (!roomViewerSockets[roomId]) roomViewerSockets[roomId] = new Set();
+    roomViewerSockets[roomId].add(socket.id);
+    socketRoomMap[socket.id] = roomId;
+
+    console.log(`[WebRTC] Viewer ${socket.id} joining room ${roomId} (broadcaster: ${broadcasterSocketId})`);
+
+    // Send ICE server configuration to the viewer
+    socket.emit("webrtc:ice-servers", { iceServers: ICE_SERVERS });
+
+    // Notify broadcaster to create a PeerConnection for this viewer
+    io.to(broadcasterSocketId).emit("webrtc:viewer-joined", {
+      viewerSocketId: socket.id,
+      roomId,
+    });
   });
 
-  // Create consumer transport (viewer)
-  socket.on('webrtc:createConsumerTransport', async (data: { roomId: string }, callback) => {
-    try {
-      const transportOptions = await mediaSoupManager.createConsumerTransport(data.roomId);
-      // Track consumer transport for cleanup on disconnect
-      if (!socketWebRtcMap[socket.id]) socketWebRtcMap[socket.id] = [];
-      socketWebRtcMap[socket.id].push({ roomId: data.roomId, consumerTransportId: transportOptions.id });
-      callback(transportOptions);
-    } catch (err) {
-      callback({ error: (err as Error).message });
+  // Broadcaster sends SDP offer to a specific viewer
+  socket.on("webrtc:offer", (data: { roomId: string; targetSocketId: string; sdp: RTCSessionDescriptionInit }) => {
+    // Validate: only the room's broadcaster can send offers
+    if (roomBroadcasters[data.roomId] !== socket.id) {
+      socket.emit("webrtc:error", { message: "Only broadcaster can send offers" });
+      return;
     }
+
+    console.log(`[WebRTC] Offer from ${socket.id} -> ${data.targetSocketId} in room ${data.roomId}`);
+
+    // Relay the offer to the specific viewer
+    io.to(data.targetSocketId).emit("webrtc:offer", {
+      fromSocketId: socket.id,
+      roomId: data.roomId,
+      sdp: data.sdp,
+    });
   });
 
-  // Connect transport (both producer and consumer)
-  socket.on('webrtc:connectTransport', async (data: { roomId: string; transportId: string; dtlsParameters: any }, callback) => {
-    try {
-      await mediaSoupManager.connectTransport(data.roomId, data.transportId, data.dtlsParameters);
-      callback({});
-    } catch (err) {
-      callback({ error: (err as Error).message });
-    }
+  // Viewer sends SDP answer back to the broadcaster
+  socket.on("webrtc:answer", (data: { roomId: string; targetSocketId: string; sdp: RTCSessionDescriptionInit }) => {
+    console.log(`[WebRTC] Answer from ${socket.id} -> ${data.targetSocketId} in room ${data.roomId}`);
+
+    // Relay the answer to the broadcaster
+    io.to(data.targetSocketId).emit("webrtc:answer", {
+      fromSocketId: socket.id,
+      roomId: data.roomId,
+      sdp: data.sdp,
+    });
   });
 
-  // Produce media (broadcaster)
-  socket.on('webrtc:produce', async (data: { roomId: string; transportId: string; kind: string; rtpParameters: any }, callback) => {
-    try {
-      const { id } = await mediaSoupManager.createProducer(data.roomId, data.transportId, data.kind, data.rtpParameters);
-      callback({ id });
-      // Notify all viewers in the stream room about the new producer
-      socket.to(`stream:${data.roomId}`).emit('webrtc:newProducer', { producerId: id, kind: data.kind });
-    } catch (err) {
-      callback({ error: (err as Error).message });
-    }
+  // ICE candidate exchange between any two peers
+  socket.on("webrtc:ice-candidate", (data: { roomId: string; targetSocketId: string; candidate: RTCIceCandidateInit }) => {
+    // Relay the ICE candidate to the target peer
+    io.to(data.targetSocketId).emit("webrtc:ice-candidate", {
+      fromSocketId: socket.id,
+      candidate: data.candidate,
+    });
   });
 
-  // Consume media (viewer)
-  socket.on('webrtc:consume', async (data: { roomId: string; consumerTransportId: string; producerId: string; rtpCapabilities: any }, callback) => {
-    try {
-      const consumer = await mediaSoupManager.createConsumer(data.roomId, data.consumerTransportId, data.producerId, data.rtpCapabilities);
-      callback(consumer);
-    } catch (err) {
-      callback({ error: (err as Error).message });
+  // Broadcaster requests ICE restart (connection recovery)
+  socket.on("webrtc:restart-ice", (data: { roomId: string; targetSocketId: string }) => {
+    if (roomBroadcasters[data.roomId] !== socket.id) {
+      return;
     }
+    // Notify the viewer to restart ICE
+    io.to(data.targetSocketId).emit("webrtc:restart-ice", {
+      fromSocketId: socket.id,
+      roomId: data.roomId,
+    });
+    console.log(`[WebRTC] ICE restart requested: ${socket.id} -> ${data.targetSocketId}`);
   });
 
-  // Resume consumer
-  socket.on('webrtc:resumeConsumer', async (data: { roomId: string; consumerId: string }, callback) => {
-    try {
-      await mediaSoupManager.resumeConsumer(data.roomId, data.consumerId);
-      callback({});
-    } catch (err) {
-      callback({ error: (err as Error).message });
+  // Viewer signals they are leaving the WebRTC session
+  socket.on("webrtc:viewer-leave", (data: { roomId: string }) => {
+    const broadcasterSocketId = roomBroadcasters[data.roomId];
+    if (broadcasterSocketId) {
+      // Notify broadcaster that this viewer left
+      io.to(broadcasterSocketId).emit("webrtc:viewer-left", {
+        viewerSocketId: socket.id,
+        roomId: data.roomId,
+      });
     }
+    if (roomViewerSockets[data.roomId]) {
+      roomViewerSockets[data.roomId].delete(socket.id);
+    }
+    delete socketRoomMap[socket.id];
+    console.log(`[WebRTC] Viewer ${socket.id} left room ${data.roomId}`);
   });
 
-  // Set consumer preferred layers (quality switching)
-  socket.on('webrtc:setPreferredLayers', async (data: { roomId: string; consumerId: string; spatialLayer: number; temporalLayer: number }, callback) => {
-    try {
-      await mediaSoupManager.setConsumerPreferredLayers(data.roomId, data.consumerId, data.spatialLayer, data.temporalLayer);
-      callback({});
-    } catch (err) {
-      callback({ error: (err as Error).message });
+  // Broadcaster signals they are stopping the WebRTC session
+  socket.on("webrtc:broadcaster-stop", (data: { roomId: string }) => {
+    // Notify all viewers that the broadcaster stopped
+    io.to(`stream:${data.roomId}`).emit("webrtc:broadcaster-left", {
+      roomId: data.roomId,
+    });
+
+    // Clean up tracking
+    const viewers = roomViewerSockets[data.roomId];
+    if (viewers) {
+      for (const viewerSid of viewers) {
+        delete socketRoomMap[viewerSid];
+      }
+      delete roomViewerSockets[data.roomId];
     }
+    delete roomBroadcasters[data.roomId];
+    delete socketRoomMap[socket.id];
+    console.log(`[WebRTC] Broadcaster stopped in room ${data.roomId}`);
   });
 
-  // Close producer
-  socket.on('webrtc:closeProducer', async (data: { roomId: string }, callback) => {
-    try {
-      await mediaSoupManager.closeProducer(data.roomId);
-      callback({});
-    } catch (err) {
-      callback({ error: (err as Error).message });
-    }
-  });
-
-  // Close consumer
-  socket.on('webrtc:closeConsumer', async (data: { roomId: string; consumerId: string }, callback) => {
-    try {
-      await mediaSoupManager.closeConsumer(data.roomId, data.consumerId);
-      callback({});
-    } catch (err) {
-      callback({ error: (err as Error).message });
-    }
+  // ---- Get current producers (for late-joining viewers) ----
+  socket.on("webrtc:get-broadcaster", (data: { roomId: string }, callback) => {
+    const broadcasterSocketId = roomBroadcasters[data.roomId];
+    callback({ broadcasterSocketId: broadcasterSocketId || null });
   });
 
   // ---- Disconnect ----
@@ -584,18 +638,45 @@ io.on("connection", (socket) => {
     if (userId) {
       delete socketUserMap[socket.id];
     }
-    // Clean up WebRTC consumer transports for this socket
-    const webrtcEntries = socketWebRtcMap[socket.id];
-    if (webrtcEntries) {
-      for (const { roomId, consumerTransportId } of webrtcEntries) {
-        mediaSoupManager.closeConsumerTransport(roomId, consumerTransportId).catch((err) => {
-          console.error(`[MediaSoup] Failed to close consumer transport on disconnect:`, err.message);
-        });
+
+    // Clean up WebRTC state
+    const roomId = socketRoomMap[socket.id];
+    if (roomId) {
+      // Check if this socket was a broadcaster
+      if (roomBroadcasters[roomId] === socket.id) {
+        console.log(`[WebRTC] Broadcaster disconnected: ${socket.id} in room ${roomId}`);
+        // Notify all viewers
+        io.to(`stream:${roomId}`).emit("webrtc:broadcaster-left", { roomId });
+        // Clean up viewer tracking
+        const viewers = roomViewerSockets[roomId];
+        if (viewers) {
+          for (const viewerSid of viewers) {
+            delete socketRoomMap[viewerSid];
+          }
+          delete roomViewerSockets[roomId];
+        }
+        delete roomBroadcasters[roomId];
+      } else {
+        // This was a viewer
+        console.log(`[WebRTC] Viewer disconnected: ${socket.id} in room ${roomId}`);
+        const broadcasterSocketId = roomBroadcasters[roomId];
+        if (broadcasterSocketId) {
+          io.to(broadcasterSocketId).emit("webrtc:viewer-left", {
+            viewerSocketId: socket.id,
+            roomId,
+          });
+        }
+        if (roomViewerSockets[roomId]) {
+          roomViewerSockets[roomId].delete(socket.id);
+        }
       }
-      delete socketWebRtcMap[socket.id];
+      delete socketRoomMap[socket.id];
     }
+
     console.log(`[WS] Disconnected: ${socket.id} (User: ${user.userId})`);
   });
 });
 
 console.log(`🟢 Rogan Live WebSocket Server running on port ${PORT} (authenticated)`);
+console.log(`[WebRTC] Mesh P2P signaling relay active`);
+console.log(`[WebRTC] ICE servers: ${ICE_SERVERS.map(s => s.urls).join(', ')}`);

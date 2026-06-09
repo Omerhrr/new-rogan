@@ -8,13 +8,14 @@ import {
   Minimize,
   Volume2,
   VolumeX,
-  Settings,
   AlertCircle,
   Loader2,
   Eye,
   Radio,
+  WifiOff,
+  RefreshCw,
 } from 'lucide-react';
-import { useMediaSoup } from '@/hooks/useMediaSoup';
+import { useWebRTC } from '@/hooks/useWebRTC';
 import { LiveBadge } from '@/components/shared/LiveBadge';
 
 // ---------------------------------------------------------------------------
@@ -29,14 +30,6 @@ interface StreamPlayerProps {
   viewerCount: number;
   isLive: boolean;
 }
-
-type QualityLevel = 'low' | 'med' | 'high';
-
-const QUALITY_MAP: Record<QualityLevel, { spatial: number; temporal: number; label: string }> = {
-  low: { spatial: 0, temporal: 0, label: '480p' },
-  med: { spatial: 1, temporal: 1, label: '720p' },
-  high: { spatial: 2, temporal: 2, label: '1080p' },
-};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -53,12 +46,12 @@ export function StreamPlayer({
   const {
     isViewing,
     remoteStream,
-    error: msError,
+    error: webrtcError,
     stats,
+    connectionState,
     startViewing,
     stopViewing,
-    setQuality,
-  } = useMediaSoup();
+  } = useWebRTC();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -66,9 +59,7 @@ export function StreamPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
-  const [quality, setQualityLevel] = useState<QualityLevel>('med');
   const [showControls, setShowControls] = useState(true);
-  const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
 
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,6 +68,7 @@ export function StreamPlayer({
   useEffect(() => {
     if (videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
+      console.log('[StreamPlayer] Remote stream attached, tracks:', remoteStream.getTracks().length);
     }
   }, [remoteStream]);
 
@@ -91,6 +83,7 @@ export function StreamPlayer({
   // ---- Click to watch ----
   const handleWatchClick = useCallback(async () => {
     setHasClicked(true);
+    setIsReconnecting(false);
     try {
       await startViewing(streamId);
     } catch {
@@ -98,16 +91,33 @@ export function StreamPlayer({
     }
   }, [startViewing, streamId]);
 
-  // ---- Quality change ----
-  const handleQualityChange = useCallback(
-    (level: QualityLevel) => {
-      setQualityLevel(level);
-      const { spatial, temporal } = QUALITY_MAP[level];
-      setQuality(spatial, temporal);
-      setShowQualityMenu(false);
-    },
-    [setQuality],
-  );
+  // ---- Reconnect handler ----
+  const handleReconnect = useCallback(async () => {
+    setIsReconnecting(true);
+    try {
+      await stopViewing();
+    } catch {
+      // Ignore
+    }
+    // Small delay before reconnecting
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      await startViewing(streamId);
+    } catch {
+      // Error handled by hook state
+    }
+    setIsReconnecting(false);
+  }, [startViewing, stopViewing, streamId]);
+
+  // ---- Auto-reconnect on connection failure ----
+  useEffect(() => {
+    if (hasClicked && connectionState === 'failed' && !isReconnecting) {
+      const timer = setTimeout(() => {
+        handleReconnect();
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [hasClicked, connectionState, isReconnecting, handleReconnect]);
 
   // ---- Fullscreen ----
   const toggleFullscreen = useCallback(async () => {
@@ -138,34 +148,17 @@ export function StreamPlayer({
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
-      if (isViewing && !showQualityMenu) {
+      if (isViewing) {
         setShowControls(false);
       }
     }, 3000);
-  }, [isViewing, showQualityMenu]);
+  }, [isViewing]);
 
   useEffect(() => {
     return () => {
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
   }, []);
-
-  // ---- Reconnection logic ----
-  useEffect(() => {
-    if (hasClicked && !isViewing && !msError && !isReconnecting) {
-      // Stream may have dropped, attempt reconnect after a delay
-      const timer = setTimeout(async () => {
-        setIsReconnecting(true);
-        try {
-          await startViewing(streamId);
-        } catch {
-          // Will retry or show error
-        }
-        setIsReconnecting(false);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [hasClicked, isViewing, msError, isReconnecting, startViewing, streamId]);
 
   // ---- Cleanup on unmount ----
   useEffect(() => {
@@ -189,6 +182,16 @@ export function StreamPlayer({
     if (bps >= 1000) return `${(bps / 1000).toFixed(1)} Mbps`;
     return `${bps} kbps`;
   };
+
+  // ---- Connection quality indicator ----
+  const getQualityBadge = (): { label: string; color: string } => {
+    if (!isViewing || stats.bitrate === 0) return { label: '...', color: 'text-gray-500' };
+    if (stats.bitrate >= 2000) return { label: 'HD', color: 'text-green-400' };
+    if (stats.bitrate >= 800) return { label: 'SD', color: 'text-yellow-400' };
+    return { label: 'LD', color: 'text-red-400' };
+  };
+
+  const qualityBadge = getQualityBadge();
 
   // =========================================================================
   // RENDER
@@ -265,7 +268,7 @@ export function StreamPlayer({
 
       {/* ---- Loading overlay ---- */}
       <AnimatePresence>
-        {hasClicked && !isViewing && !msError && (
+        {hasClicked && !isViewing && !webrtcError && (
           <motion.div
             key="loading"
             initial={{ opacity: 0 }}
@@ -279,6 +282,9 @@ export function StreamPlayer({
               <p className="text-white text-sm font-medium">
                 {isReconnecting ? 'Reconnecting...' : 'Connecting to stream...'}
               </p>
+              {connectionState === 'connecting' && (
+                <p className="text-gray-400 text-xs mt-2">Establishing P2P connection...</p>
+              )}
             </div>
           </motion.div>
         )}
@@ -286,7 +292,7 @@ export function StreamPlayer({
 
       {/* ---- Error overlay ---- */}
       <AnimatePresence>
-        {msError && (
+        {webrtcError && (
           <motion.div
             key="error"
             initial={{ opacity: 0 }}
@@ -296,17 +302,31 @@ export function StreamPlayer({
             className="absolute inset-0 z-20 flex items-center justify-center bg-black/80"
           >
             <div className="text-center px-6">
-              <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+              {connectionState === 'failed' ? (
+                <WifiOff className="w-10 h-10 text-red-400 mx-auto mb-3" />
+              ) : (
+                <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+              )}
               <p className="text-white text-sm font-medium mb-1">Connection Error</p>
-              <p className="text-gray-400 text-xs mb-4">{msError}</p>
-              <button
-                onClick={() => {
-                  setHasClicked(false);
-                }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
-              >
-                Try Again
-              </button>
+              <p className="text-gray-400 text-xs mb-4">{webrtcError}</p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={handleReconnect}
+                  disabled={isReconnecting}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isReconnecting ? 'animate-spin' : ''}`} />
+                  Reconnect
+                </button>
+                <button
+                  onClick={() => {
+                    setHasClicked(false);
+                  }}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg transition-colors"
+                >
+                  Back
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
@@ -350,7 +370,7 @@ export function StreamPlayer({
             transition={{ duration: 0.2 }}
             className="absolute bottom-0 left-0 right-0 z-10 p-3 md:p-4 bg-gradient-to-t from-black/70 to-transparent"
           >
-            {/* Progress bar / quality indicator */}
+            {/* Status bar */}
             <div className="flex items-center gap-3 mb-2">
               {/* Live indicator dot */}
               <div className="flex items-center gap-1.5">
@@ -366,9 +386,16 @@ export function StreamPlayer({
               )}
 
               {/* Quality badge */}
-              <span className="text-gray-400 text-[10px] font-medium bg-white/10 px-1.5 py-0.5 rounded">
-                {QUALITY_MAP[quality].label}
+              <span className={`text-[10px] font-medium bg-white/10 px-1.5 py-0.5 rounded ${qualityBadge.color}`}>
+                {qualityBadge.label}
               </span>
+
+              {/* RTT */}
+              {stats.rtt > 0 && (
+                <span className="text-gray-500 text-[10px] font-mono">
+                  {stats.rtt}ms
+                </span>
+              )}
             </div>
 
             <div className="flex items-center justify-between">
@@ -404,47 +431,6 @@ export function StreamPlayer({
               </div>
 
               <div className="flex items-center gap-1">
-                {/* Quality selector */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowQualityMenu(!showQualityMenu)}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-white hover:bg-white/10 transition-colors"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </button>
-
-                  <AnimatePresence>
-                    {showQualityMenu && (
-                      <motion.div
-                        key="quality-menu"
-                        initial={{ opacity: 0, scale: 0.9, y: 5 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.9, y: 5 }}
-                        transition={{ duration: 0.15 }}
-                        className="absolute bottom-full right-0 mb-2 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-xl overflow-hidden min-w-[140px]"
-                      >
-                        <div className="px-3 py-2 border-b border-white/5">
-                          <span className="text-gray-400 text-[10px] font-semibold uppercase tracking-wider">Quality</span>
-                        </div>
-                        {(['low', 'med', 'high'] as QualityLevel[]).map((level) => (
-                          <button
-                            key={level}
-                            onClick={() => handleQualityChange(level)}
-                            className={`w-full px-3 py-2 text-left text-sm transition-colors flex items-center justify-between ${
-                              quality === level
-                                ? 'text-red-400 bg-red-500/10'
-                                : 'text-gray-300 hover:bg-white/5'
-                            }`}
-                          >
-                            <span className="capitalize">{level}</span>
-                            <span className="text-[10px] text-gray-500">{QUALITY_MAP[level].label}</span>
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
                 {/* Fullscreen toggle */}
                 <button
                   onClick={toggleFullscreen}

@@ -44,7 +44,7 @@ export function useSocket(userId?: string) {
             },
           });
 
-          // Store socket ref for ack-based signaling (mediasoup)
+          // Store socket ref for WebRTC signaling
           setSocketRef(socketRef.current);
 
           socketRef.current.on('connect', () => {

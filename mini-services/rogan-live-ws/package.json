@@ -5,7 +5,6 @@
     "dev": "bun --hot index.ts"
   },
   "dependencies": {
-    "socket.io": "^4.7.4",
-    "mediasoup": "^3.14.0"
+    "socket.io": "^4.7.4"
   }
 }

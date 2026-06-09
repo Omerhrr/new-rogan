@@ -8,7 +8,7 @@ const secretHash = createHash('sha256').update(EFFECTIVE_SECRET).digest('hex').s
 
 /**
  * GET /api/auth/ws-token
- * Issues a short-lived JWT token for WebSocket authentication.
+ * Issues a JWT token for WebSocket authentication.
  * This is needed because the main auth cookie is httpOnly and
  * cannot be read by client-side JavaScript (document.cookie).
  */
@@ -19,7 +19,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    // Issue a short-lived token (5 minutes) specifically for WS auth
+    // Issue a token specifically for WS auth
     const wsToken = signToken({
       userId: user.id,
       email: user.email,
@@ -27,11 +27,13 @@ export async function GET() {
     });
 
     // Include secret hash in response for debugging (not the actual secret!)
+    // Compare this hash with the WS server's hash to diagnose JWT mismatches
     return NextResponse.json({
       token: wsToken,
       _debug: { secretHash },
     });
-  } catch {
+  } catch (err) {
+    console.error('[WS-Token] Error generating token:', err);
     return NextResponse.json({ error: 'Failed to generate WS token' }, { status: 500 });
   }
 }

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStreamStore } from '@/stores/streamStore';
 import { useAuthStore } from '@/stores/authStore';
-import { useMediaSoup } from '@/hooks/useMediaSoup';
+import { useWebRTC } from '@/hooks/useWebRTC';
 import {
   Radio,
   X,
@@ -19,6 +19,9 @@ import {
   Signal,
   Camera,
   MonitorUp,
+  Wifi,
+  WifiOff,
+  Users,
 } from 'lucide-react';
 import { LiveBadge } from '@/components/shared/LiveBadge';
 
@@ -47,11 +50,13 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
   const {
     isStreaming,
     localStream,
-    error: msError,
+    error: webrtcError,
     stats,
+    connectionState,
+    viewerCount,
     startBroadcasting,
     stopBroadcasting,
-  } = useMediaSoup();
+  } = useWebRTC();
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -71,12 +76,31 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
   const [showDeviceMenu, setShowDeviceMenu] = useState<'camera' | 'mic' | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
+  // ---- Stream duration ----
+  const [streamDuration, setStreamDuration] = useState('00:00:00');
+  const streamStartRef = useRef<Date | null>(null);
+
   // ---- Attach local stream to preview ----
   useEffect(() => {
     if (videoRef.current && localStream) {
       videoRef.current.srcObject = localStream;
     }
   }, [localStream]);
+
+  // ---- Stream duration timer ----
+  useEffect(() => {
+    if (!isLive || !streamStartRef.current) return;
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - streamStartRef.current!.getTime();
+      const hours = Math.floor(elapsed / 3600000);
+      const minutes = Math.floor((elapsed % 3600000) / 60000);
+      const seconds = Math.floor((elapsed % 60000) / 1000);
+      setStreamDuration(
+        `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`,
+      );
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isLive]);
 
   // ---- Enumerate devices ----
   const enumerateDevices = useCallback(async () => {
@@ -89,7 +113,6 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
           kind: d.kind,
         })),
       );
-      // Set defaults if none selected
       const videoInput = allDevices.find((d) => d.kind === 'videoinput');
       const audioInput = allDevices.find((d) => d.kind === 'audioinput');
       if (videoInput && !selectedCamera) setSelectedCamera(videoInput.deviceId);
@@ -101,7 +124,6 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
 
   useEffect(() => {
     enumerateDevices();
-    // Re-enumerate when permissions change
     navigator.mediaDevices.addEventListener('devicechange', enumerateDevices);
     return () => {
       navigator.mediaDevices.removeEventListener('devicechange', enumerateDevices);
@@ -141,15 +163,13 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
         return;
       }
 
-      // 2. Start WebRTC broadcasting (camera + mic + producer transport)
+      // 2. Start WebRTC broadcasting (camera + mic + P2P connections)
       try {
         await startBroadcasting(stream.id);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error';
-        // Check for permission errors
         if (msg.includes('Permission') || msg.includes('NotAllowedError') || msg.includes('denied')) {
           setPermissionError('Camera or microphone access was denied. Please allow permissions and try again.');
-          // Clean up the stream record since we can't go live
           await useStreamStore.getState().endStream(stream.id);
           setIsStarting(false);
           return;
@@ -160,12 +180,12 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
           setIsStarting(false);
           return;
         }
-        // Generic WebRTC error - still show the stream as live (audio-only, etc.)
         console.error('[GoLiveView] WebRTC error:', msg);
       }
 
       // 3. Mark as live
       setIsLive(true);
+      streamStartRef.current = new Date();
       setCurrentStreamId(stream.id);
       emitSocket('stream:start', {
         streamId: stream.id,
@@ -187,19 +207,14 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
     if (!currentStreamId) return;
 
     try {
-      // 1. Stop WebRTC
       await stopBroadcasting();
     } catch {
       // Ignore cleanup errors
     }
 
-    // 2. End DB stream record
     await useStreamStore.getState().endStream(currentStreamId);
-
-    // 3. Notify via socket
     emitSocket('stream:end', { streamId: currentStreamId });
 
-    // 4. Reset state
     setIsLive(false);
     setCurrentStreamId(null);
     setTitle('');
@@ -207,6 +222,8 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
     setCameraEnabled(true);
     setMicEnabled(true);
     setPermissionError(null);
+    setStreamDuration('00:00:00');
+    streamStartRef.current = null;
   };
 
   // ---- Format bitrate ----
@@ -217,14 +234,18 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
   };
 
   // ---- Stream health status ----
-  const getHealthStatus = (): { color: string; label: string } => {
-    if (stats.bitrate === 0) return { color: 'text-gray-500', label: 'Connecting...' };
-    if (stats.bitrate >= 2000 && stats.fractionLost < 0.02) return { color: 'text-green-400', label: 'Excellent' };
-    if (stats.bitrate >= 800 && stats.fractionLost < 0.05) return { color: 'text-yellow-400', label: 'Good' };
-    return { color: 'text-red-400', label: 'Poor' };
+  const getHealthStatus = (): { color: string; label: string; icon: typeof Wifi } => {
+    if (connectionState === 'failed') return { color: 'text-red-400', label: 'Disconnected', icon: WifiOff };
+    if (connectionState === 'disconnected') return { color: 'text-yellow-400', label: 'Reconnecting...', icon: Wifi };
+    if (connectionState === 'connecting') return { color: 'text-yellow-400', label: 'Connecting...', icon: Wifi };
+    if (stats.bitrate === 0) return { color: 'text-gray-500', label: 'Starting...', icon: Wifi };
+    if (stats.bitrate >= 2000 && stats.fractionLost < 0.02) return { color: 'text-green-400', label: 'Excellent', icon: Wifi };
+    if (stats.bitrate >= 800 && stats.fractionLost < 0.05) return { color: 'text-yellow-400', label: 'Good', icon: Wifi };
+    return { color: 'text-red-400', label: 'Poor', icon: Wifi };
   };
 
   const health = getHealthStatus();
+  const HealthIcon = health.icon;
 
   // =========================================================================
   // RENDER
@@ -264,14 +285,23 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
                 {/* Live badge overlay */}
                 <div className="absolute top-3 left-3 flex items-center gap-2">
                   <LiveBadge className="text-sm px-3 py-1" />
+                  <span className="text-white text-xs font-mono bg-black/60 backdrop-blur-sm px-2 py-1 rounded-full">
+                    {streamDuration}
+                  </span>
                 </div>
 
-                {/* Duration / health overlay */}
+                {/* Health + viewer count overlay */}
                 <div className="absolute top-3 right-3 flex items-center gap-2">
                   <div className={`flex items-center gap-1 px-2 py-1 rounded-full bg-black/60 backdrop-blur-sm text-xs font-medium ${health.color}`}>
-                    <Activity className="w-3 h-3" />
+                    <HealthIcon className="w-3 h-3" />
                     {health.label}
                   </div>
+                  {viewerCount > 0 && (
+                    <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-black/60 backdrop-blur-sm text-white text-xs font-medium">
+                      <Users className="w-3 h-3" />
+                      {viewerCount}
+                    </div>
+                  )}
                 </div>
 
                 {/* No camera fallback */}
@@ -280,6 +310,17 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
                     <div className="text-center">
                       <VideoOff className="w-12 h-12 text-gray-600 mx-auto mb-2" />
                       <p className="text-gray-500 text-sm">No camera feed</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Connection error overlay */}
+                {connectionState === 'failed' && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                    <div className="text-center">
+                      <WifiOff className="w-10 h-10 text-red-400 mx-auto mb-2" />
+                      <p className="text-red-300 text-sm font-medium">Connection Lost</p>
+                      <p className="text-gray-400 text-xs mt-1">Attempting to reconnect...</p>
                     </div>
                   </div>
                 )}
@@ -399,7 +440,7 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
                   <Signal className="w-4 h-4 text-gray-400" />
                   <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">Stream Health</span>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-4 gap-3">
                   <div className="bg-[#111] rounded-lg p-3 text-center">
                     <p className="text-gray-500 text-[10px] mb-1">Bitrate</p>
                     <p className="text-white text-sm font-bold">{formatBitrate(stats.bitrate)}</p>
@@ -409,10 +450,20 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
                     <p className="text-white text-sm font-bold">{(stats.fractionLost * 100).toFixed(1)}%</p>
                   </div>
                   <div className="bg-[#111] rounded-lg p-3 text-center">
+                    <p className="text-gray-500 text-[10px] mb-1">RTT</p>
+                    <p className="text-white text-sm font-bold">{stats.rtt > 0 ? `${stats.rtt}ms` : '--'}</p>
+                  </div>
+                  <div className="bg-[#111] rounded-lg p-3 text-center">
                     <p className="text-gray-500 text-[10px] mb-1">Status</p>
                     <p className={`text-sm font-bold ${health.color}`}>{health.label}</p>
                   </div>
                 </div>
+                {stats.codec && stats.codec !== 'unknown' && (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <span className="text-gray-600 text-[10px]">Codec:</span>
+                    <span className="text-gray-400 text-[10px] font-mono">{stats.codec}</span>
+                  </div>
+                )}
               </div>
 
               {/* End stream button */}
@@ -556,9 +607,9 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
                     )}
                   </AnimatePresence>
 
-                  {/* MediaSoup error */}
+                  {/* WebRTC error */}
                   <AnimatePresence>
-                    {msError && !permissionError && (
+                    {webrtcError && !permissionError && (
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
@@ -567,7 +618,7 @@ export function GoLiveView({ onStreamStarted, emitSocket }: GoLiveViewProps) {
                       >
                         <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
                           <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                          <p className="text-red-300 text-sm">{msError}</p>
+                          <p className="text-red-300 text-sm">{webrtcError}</p>
                         </div>
                       </motion.div>
                     )}
