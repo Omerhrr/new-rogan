@@ -9,7 +9,9 @@ if (!JWT_SECRET) {
 
 const ALLOWED_ORIGINS = (process.env.WS_ORIGINS || "http://localhost:3000").split(",");
 
-const io = new Server(3003, {
+const PORT = parseInt(process.env.PORT || '3001', 10);
+
+const io = new Server(PORT, {
   cors: {
     origin: ALLOWED_ORIGINS,
     methods: ["GET", "POST"],
@@ -405,4 +407,4 @@ io.on("connection", (socket) => {
   });
 });
 
-console.log("🟢 Rogan Live WebSocket Server running on port 3003 (authenticated)");
+console.log(`🟢 Rogan Live WebSocket Server running on port ${PORT} (authenticated)`);

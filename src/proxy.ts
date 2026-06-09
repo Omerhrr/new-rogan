@@ -1,5 +1,6 @@
-// ── Rogan Live · Next.js Middleware ─────────────────────────────────
+// ── Rogan Live · Next.js Proxy (middleware) ─────────────────────────
 // Enforces authentication on API routes and protects sensitive endpoints.
+// Renamed from middleware.ts to proxy.ts for Next.js 16 compatibility.
 import { NextRequest, NextResponse } from 'next/server';
 
 // Routes that require authentication (all /api/ routes except public ones)
@@ -23,7 +24,7 @@ const PUBLIC_METHODS: Record<string, string[]> = {
   '/api/users': ['GET'],
 };
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Only apply to API routes

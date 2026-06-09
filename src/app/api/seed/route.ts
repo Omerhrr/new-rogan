@@ -10,10 +10,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden in production' }, { status: 403 });
     }
 
-    // SECURITY: Require admin authentication even in development
-    const user = await getUserFromRequest();
-    if (!user || user.role !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required. In dev, use seed script directly.' }, { status: 403 });
+    // In development, allow seeding without auth for convenience.
+    // In any other environment, require admin authentication.
+    if (process.env.NODE_ENV !== 'development') {
+      const user = await getUserFromRequest();
+      if (!user || user.role !== 'admin') {
+        return NextResponse.json({ error: 'Admin access required.' }, { status: 403 });
+      }
     }
 
     // Clean up existing data (Phase 3 models first due to foreign keys)
